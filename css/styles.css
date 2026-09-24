@@ -21,6 +21,8 @@
 }
 
 * { box-sizing: border-box; }
+/* hidden 属性を常に最優先で隠す（.modal-overlay 等の display 指定に負けないように） */
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--c-bg);
