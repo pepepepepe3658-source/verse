@@ -556,7 +556,7 @@
     });
 
     const body = el('div', { class: 'data-actions' }, [
-      el('button', { class: 'btn', text: '⬇ データをバックアップ（ZIP）', onclick: doBackup }),
+      el('button', { class: 'btn', text: '⬇ データをバックアップ（ZIP）', onclick: confirmBackup }),
       el('button', { class: 'btn', text: '⬆ バックアップを復元（ZIP）', onclick: () => restoreInput.click() }),
       restoreInput,
       el('div', { class: 'notice', text: '歌詞・音声・動画・バージョンをすべて1つのZIPにまとめて保存/復元します。ファイルは端末内で処理され、外部に送信されません。' }),
@@ -564,10 +564,23 @@
     openModal('データ管理', body, [el('button', { class: 'btn btn-primary', text: '閉じる', onclick: closeModal })]);
   }
 
+  // バックアップ実行前の確認ダイアログ
+  function confirmBackup() {
+    const body = el('div', {}, [
+      el('p', { text: '歌詞・音声・動画・バージョンをすべて1つのZIPファイルにまとめてダウンロードします。よろしいですか？', style: 'margin-top:0' }),
+      el('div', { class: 'notice', text: 'ファイルは端末内で処理され、外部には送信されません。データ量が多い場合は作成に時間がかかることがあります。' }),
+    ]);
+    const cancel = el('button', { class: 'btn', text: 'キャンセル', onclick: closeModal });
+    const ok = el('button', { class: 'btn btn-primary', text: '作成してダウンロード', onclick: doBackup });
+    openModal('バックアップの作成', body, [cancel, ok]);
+  }
+
   async function doBackup() {
     const c = $('modalContent');
+    c.innerHTML = '';
     const prog = el('div', { class: 'progress', text: 'バックアップZIPを作成中…' });
     c.appendChild(prog);
+    $('modalFooter').innerHTML = '';
     try {
       const size = await Backup.downloadBackup();
       prog.textContent = 'バックアップを作成しました（' + StorageInfo.fmtBytes(size) + '）。ダウンロードを確認してください。';
@@ -575,6 +588,7 @@
     } catch (e) {
       prog.textContent = 'バックアップに失敗しました: ' + (e && e.message ? e.message : e);
     }
+    $('modalFooter').appendChild(el('button', { class: 'btn btn-primary', text: '閉じる', onclick: closeModal }));
   }
 
   async function promptRestore(file) {
