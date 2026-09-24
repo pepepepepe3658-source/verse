@@ -565,7 +565,17 @@
   }
 
   // バックアップ実行前の確認ダイアログ
-  function confirmBackup() {
+  async function confirmBackup() {
+    // バックアップ対象が1件もない場合は、その旨を表示して中断する
+    const [songs, media, versions] = await Promise.all([DB.Songs.all(), DB.Media.all(), DB.Versions.all()]);
+    if (songs.length === 0 && media.length === 0 && versions.length === 0) {
+      const emptyBody = el('div', {}, [
+        el('p', { text: 'バックアップ対象のデータがありません。', style: 'margin-top:0' }),
+        el('div', { class: 'notice', text: '曲を追加してからバックアップを実行してください。' }),
+      ]);
+      openModal('バックアップ', emptyBody, [el('button', { class: 'btn btn-primary', text: '閉じる', onclick: closeModal })]);
+      return;
+    }
     const body = el('div', {}, [
       el('p', { text: '歌詞・音声・動画・バージョンをすべて1つのZIPファイルにまとめてダウンロードします。よろしいですか？', style: 'margin-top:0' }),
       el('div', { class: 'notice', text: 'ファイルは端末内で処理され、外部には送信されません。データ量が多い場合は作成に時間がかかることがあります。' }),
