@@ -229,7 +229,10 @@
 
   async function sectionMedia(song, kind) {
     const title = kind === 'audio' ? 'ボイスメモ（音声）' : '動画';
-    const accept = kind === 'audio' ? 'audio/*' : 'video/*';
+    // 音声は accept フィルタを付けない（iOS Safari では accept 指定により
+    // ファイルアプリ内の音声=.m4a 等がグレーアウトして選べなくなるため）。
+    // → すべてのファイルを選択可能にし、選択後にコード側で音声として保存する。
+    const accept = kind === 'audio' ? null : 'video/*';
     const fileInput = el('input', { type: 'file', accept, multiple: 'multiple', style: 'display:none' });
     fileInput.addEventListener('change', async () => {
       if (!fileInput.files.length) return;
@@ -247,6 +250,9 @@
 
     const body = el('div', { class: 'section-body' });
     body.appendChild(fileInput);
+    if (kind === 'audio') {
+      body.appendChild(el('div', { class: 'notice', style: 'margin-bottom:12px', text: 'iPhoneのボイスメモは、ボイスメモアプリで「共有 →「"ファイル"に保存」」で端末に保存してから、ここで選択してください。' }));
+    }
     const media = (await DB.Media.bySong(song.id)).filter(m => m.kind === kind)
       .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
 
