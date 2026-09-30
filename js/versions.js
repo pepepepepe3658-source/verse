@@ -1,6 +1,6 @@
 /* ============================================================
  * versions.js — 歌詞+基本情報のスナップショット（バージョン管理）
- *   ※ 音声・動画はバージョンに含まれない。
+ *   ※ 歌詞＋基本情報＋コード進行を保存する。音声・動画はバージョンに含まれない。
  *   - VersionLib.snapshot(song, note) : 現在の曲から版を作成・保存
  *   - VersionLib.diffLines(oldText, newText) : 行単位の簡易差分
  * ============================================================ */
@@ -16,6 +16,7 @@
       status: song.status,
       tags: Array.isArray(song.tags) ? song.tags.slice() : [],
       lyrics: song.lyrics || '',
+      chords: song.chords ? JSON.parse(JSON.stringify(song.chords)) : null,
       note: note || '',
     };
     await DB.Versions.put(v);
