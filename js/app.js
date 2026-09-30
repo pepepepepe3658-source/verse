@@ -609,13 +609,13 @@
       const chip = el('div', { class: 'chord-chip' + (valid ? '' : ' invalid'), 'data-si': si, 'data-bi': bi, 'data-ci': ci, title: valid ? '' : '未知のコード（再生されません）' });
       chip.appendChild(el('span', { class: 'cc-name', text: displayNameSec(sec, sym) }));
       if ((sec.capo || 0) > 0) chip.appendChild(el('span', { class: 'cc-shape', text: shapeNameSec(sec, sym) }));
-      chip.addEventListener('click', () => editChord(song, bar, ci, body));
+      chip.addEventListener('click', () => editChord(song, sec, bar, ci, body));
       const del = el('button', { class: 'cc-del', text: '×', 'aria-label': 'コード削除' });
       del.addEventListener('click', async (e) => { e.stopPropagation(); bar.chords.splice(ci, 1); await saveChords(song); renderChordBody(song, body); });
       chip.appendChild(del);
       chips.appendChild(chip);
     });
-    const add = el('button', { class: 'bar-add', text: '＋', 'aria-label': 'コード追加', onclick: () => addChord(song, bar, body) });
+    const add = el('button', { class: 'bar-add', text: '＋', 'aria-label': 'コード追加', onclick: () => addChord(song, sec, bar, body) });
     const barDel = el('button', { class: 'bar-del', text: '小節を削除', onclick: async () => { sec.bars.splice(bi, 1); await saveChords(song); renderChordBody(song, body); } });
     return el('div', { class: 'bar-box' }, [
       el('div', { class: 'bar-top' }, [el('span', { class: 'bar-no', text: String(bi + 1) }), barDel]),
@@ -624,11 +624,13 @@
     ]);
   }
 
-  function addChord(song, bar, body) {
-    openChordPicker('コードを追加', '', (v) => { bar.chords = bar.chords || []; bar.chords.push(v); saveChords(song).then(() => renderChordBody(song, body)); });
+  // 表示中の名前（移調適用後）で入力し、保存時に生データ（transpose=0基準）へ逆変換して整合させる
+  function chordToRaw(sec, v) { const tr = sec.transpose || 0; return tr === 0 ? v : ChordLib.transpose(v, -tr, false); }
+  function addChord(song, sec, bar, body) {
+    openChordPicker('コードを追加', '', (v) => { bar.chords = bar.chords || []; bar.chords.push(chordToRaw(sec, v)); saveChords(song).then(() => renderChordBody(song, body)); });
   }
-  function editChord(song, bar, ci, body) {
-    openChordPicker('コードを編集', bar.chords[ci], (v) => { bar.chords[ci] = v; saveChords(song).then(() => renderChordBody(song, body)); });
+  function editChord(song, sec, bar, ci, body) {
+    openChordPicker('コードを編集', displayNameSec(sec, bar.chords[ci]), (v) => { bar.chords[ci] = chordToRaw(sec, v); saveChords(song).then(() => renderChordBody(song, body)); });
   }
 
   function renameChordSection(song, sec, body) {
@@ -1050,21 +1052,33 @@
   function openQuickCapture() {
     const memo = el('textarea', { class: 'chord-input qc-memo', placeholder: '思いついた歌詞・アイデアをメモ…' });
     let recorded = null;
+    let recording = false;
     const recSupported = !!(window.Recorder && Recorder.isSupported());
     const recStatus = el('span', { class: 'qc-rec-status', text: recSupported ? '' : '（このブラウザは録音に非対応）' });
-    const recBtn = el('button', {
-      class: 'btn btn-sm', text: '● 録音', disabled: recSupported ? null : 'disabled',
-      onclick: () => openRecorder((r) => { recorded = r; recStatus.textContent = '録音あり（保存時に追加されます）'; })
+    // クイックキャプチャは共有モーダル上で動くため、別モーダルを開かずインラインで録音する
+    const recBtn = el('button', { class: 'btn btn-sm', text: '● 録音', disabled: recSupported ? null : 'disabled' });
+    recBtn.addEventListener('click', async () => {
+      if (!recSupported) return;
+      if (!recording) {
+        try {
+          await Recorder.start((sec) => { recStatus.textContent = '録音中… ' + Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); });
+          recording = true; recBtn.textContent = '■ 停止';
+        } catch (e) { recStatus.textContent = 'マイクを使用できませんでした（権限を確認してください）'; }
+      } else {
+        try { recorded = await Recorder.stop(); recording = false; recBtn.textContent = '● 録り直す'; recStatus.textContent = '録音あり（保存時に追加されます）'; }
+        catch (e) { recording = false; recBtn.textContent = '● 録音'; recStatus.textContent = '録音の保存に失敗しました'; }
+      }
     });
     const body = el('div', {}, [
       el('div', { class: 'field' }, [el('label', { text: 'メモ（歌詞・アイデア）' }), memo]),
       el('div', { class: 'qc-rec' }, [recBtn, recStatus]),
       el('div', { class: 'hint', text: '保存すると「無題（日付）」の新しい曲として作成されます。あとで曲名や情報を整理できます。' }),
     ]);
-    const cancel = el('button', { class: 'btn', text: 'キャンセル', onclick: closeModal });
+    const cancel = el('button', { class: 'btn', text: 'キャンセル', onclick: () => { if (recording) Recorder.cancel(); closeModal(); } });
     const save = el('button', {
       class: 'btn btn-primary', text: '保存',
       onclick: async () => {
+        if (recording) { toast('録音を停止してから保存してください'); return; }
         const text = memo.value.trim();
         if (!text && !recorded) { toast('メモを入力するか録音してください'); return; }
         const now = new Date(); const p = (n) => String(n).padStart(2, '0');
