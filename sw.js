@@ -4,7 +4,7 @@
  *   ユーザーの音声・動画は IndexedDB に保存されており、ここではキャッシュしない。
  *   → オフラインでアプリ起動＋保存済みメディア再生が可能。
  * ============================================================ */
-const CACHE = 'verse-shell-v13';
+const CACHE = 'verse-shell-v15';
 const SHELL = [
   './',
   './index.html',
@@ -19,6 +19,8 @@ const SHELL = [
   './js/chords.js',
   './js/audio.js',
   './js/recorder.js',
+  './js/lyricsync.js',
+  './js/karaoke.js',
   './js/app.js',
   './icons/icon.svg',
   './icons/icon-192.png',
