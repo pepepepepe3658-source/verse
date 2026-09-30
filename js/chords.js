@@ -129,36 +129,65 @@
 
   function isValid(sym) { return parse(sym) != null; }
 
+  const SETTING_KEYS = ['tempo', 'beatsPerBar', 'beatUnit', 'capo', 'transpose', 'style', 'loop'];
+  function defaultSettings() {
+    return { tempo: 90, beatsPerBar: 4, beatUnit: 4, capo: 0, transpose: 0, style: 'block', loop: false };
+  }
   function defaultProgression() {
-    return { tempo: 90, beatsPerBar: 4, beatUnit: 4, capo: 0, transpose: 0, style: 'block', loop: false, sections: [] };
+    return { defaults: defaultSettings(), sections: [] };
   }
 
-  // song.chords を既定値で補完（後方互換）
+  // song.chords を新スキーマ（defaults＋セクション別設定）へ補完・移行する
+  //   旧形式（chords直下に tempo 等・sectionsはbarsのみ）も自動変換。
   function ensure(song) {
-    const d = defaultProgression();
-    if (!song.chords || typeof song.chords !== 'object') { song.chords = d; return song.chords; }
+    if (!song.chords || typeof song.chords !== 'object') { song.chords = defaultProgression(); return song.chords; }
     const c = song.chords;
-    for (const k in d) if (c[k] == null) c[k] = d[k];
+
+    // defaults の用意（旧形式なら直下の設定値から引き継ぐ）
+    if (!c.defaults || typeof c.defaults !== 'object') {
+      const d = defaultSettings();
+      SETTING_KEYS.forEach(k => { if (c[k] != null) d[k] = c[k]; });
+      c.defaults = d;
+    } else {
+      const d = defaultSettings();
+      SETTING_KEYS.forEach(k => { if (c.defaults[k] == null) c.defaults[k] = d[k]; });
+    }
+
     if (!Array.isArray(c.sections)) c.sections = [];
+    // 各セクションに設定・bars・name を補完（無ければ defaults から）
+    c.sections.forEach(s => {
+      SETTING_KEYS.forEach(k => { if (s[k] == null) s[k] = c.defaults[k]; });
+      if (!Array.isArray(s.bars)) s.bars = [];
+      if (s.name == null) s.name = '';
+    });
+
+    // 旧直下キーを掃除（defaultsへ移行済み）
+    SETTING_KEYS.forEach(k => { if (k in c) delete c[k]; });
     return c;
   }
 
-  // 進行中の最初の解析可能コードの主音pc（表記♯♭の自動判定に使用）
-  function tonicPc(chords) {
-    for (const s of (chords.sections || [])) {
-      for (const bar of (s.bars || [])) {
-        for (const sym of (bar.chords || [])) {
-          const p = parse(sym);
-          if (p) return p.rootPc;
-        }
+  // 指定セクション内の最初の解析可能コードの主音pc（表記♯♭の自動判定に使用）
+  function tonicPcOf(section) {
+    for (const bar of ((section && section.bars) || [])) {
+      for (const sym of (bar.chords || [])) {
+        const p = parse(sym);
+        if (p) return p.rootPc;
       }
+    }
+    return 0;
+  }
+  // 進行全体の最初の解析可能コード主音pc（後方互換）
+  function tonicPc(chords) {
+    for (const s of ((chords && chords.sections) || [])) {
+      const t = tonicPcOf(s);
+      for (const bar of (s.bars || [])) for (const sym of (bar.chords || [])) { if (parse(sym)) return t; }
     }
     return 0;
   }
 
   global.ChordLib = {
     parse, pcs, freqs, transpose, spell, preferFlatForKey, noteToFreq, isValid,
-    defaultProgression, ensure, tonicPc,
+    defaultSettings, defaultProgression, ensure, tonicPc, tonicPcOf,
     QUALITIES, ROOTS, SHARP, FLAT,
   };
 })(window);

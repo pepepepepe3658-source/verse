@@ -45,15 +45,18 @@
   }
 
   // chordList を context に流し込む（online/offline共用）。返り値: 総秒数と各stepの開始秒。
+  //   tempo/style はアイテム単位（item.tempo/item.style）を優先し、無ければ opts を使用。
   function scheduleInto(context, master, chordList, opts, startAt) {
-    const tempo = Math.max(20, Math.min(300, opts.tempo || 90));
-    const beatDur = 60 / tempo;
-    const style = opts.style || 'block';
+    const defTempo = opts.tempo || 90;
+    const defStyle = opts.style || 'block';
     let t = startAt;
     const steps = [];
     const oscs = [];
     for (let i = 0; i < chordList.length; i++) {
       const item = chordList[i];
+      const tempo = Math.max(20, Math.min(300, item.tempo || defTempo));
+      const beatDur = 60 / tempo;
+      const style = item.style || defStyle;
       const dur = Math.max(0.05, (item.beats || 1) * beatDur);
       steps.push(t);
       const freqs = item.freqs || [];
@@ -130,10 +133,10 @@
     opts = opts || {};
     const OAC = global.OfflineAudioContext || global.webkitOfflineAudioContext;
     if (!OAC) throw new Error('OfflineAudioContext 非対応');
-    const tempo = opts.tempo || 90;
-    const beatDur = 60 / tempo;
-    const totalBeats = chordList.reduce((a, c) => a + (c.beats || 1), 0);
-    const seconds = Math.max(0.5, totalBeats * beatDur + 0.5);
+    const defTempo = opts.tempo || 90;
+    let seconds = 0.5;
+    chordList.forEach(c => { const tempo = c.tempo || defTempo; seconds += (c.beats || 1) * (60 / tempo); });
+    seconds = Math.max(0.5, seconds);
     const sr = 44100;
     const octx = new OAC(1, Math.ceil(seconds * sr), sr);
     const master = octx.createGain();

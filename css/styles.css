@@ -240,6 +240,12 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border: none;
 .chord-tr-val { font-variant-numeric: tabular-nums; min-width: 34px; text-align: center; font-size: 13px; }
 .chord-loop { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text-2); cursor: pointer; }
 
+.chord-defaults { border: 1px dashed var(--c-border-2); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 14px; }
+.chord-defaults-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.chord-defaults-label { font-size: 12px; font-weight: 700; color: var(--c-text-2); }
+.chord-copyrow { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; margin-top: 4px; }
+.chord-hint { width: 100%; font-size: 11px; color: var(--c-text-3); }
+
 .chord-section { border: 1px solid var(--c-border); border-radius: var(--radius-sm); margin-bottom: 12px; overflow: hidden; }
 .chord-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--c-surface-2); border-bottom: 1px solid var(--c-border); }
 .chord-section-name { font-weight: 700; font-size: 13px; cursor: pointer; padding: 2px 6px; border-radius: 5px; }

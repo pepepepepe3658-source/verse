@@ -358,7 +358,7 @@
   }
 
   // ==========================================================
-  // コード進行（作成・編集・移調・カポ・自動再生）
+  // コード進行（セクション単位設定・コピー/複製・全曲/個別再生）
   // ==========================================================
   const TIME_SIGS = [
     { label: '4/4', n: 4, d: 4 }, { label: '3/4', n: 3, d: 4 },
@@ -367,7 +367,15 @@
   const CHORD_STYLES = [
     { v: 'block', label: 'ブロック' }, { v: 'strum', label: 'ストラム' }, { v: 'arpeggio', label: 'アルペジオ' },
   ];
+  const SETTING_KEYS = ['tempo', 'beatsPerBar', 'beatUnit', 'capo', 'transpose', 'style', 'loop'];
   let chordPlaying = false;
+  let activePlayBtn = null;         // 現在再生中のボタン
+  let settingsClipboard = null;     // 設定コピー用クリップボード
+  const openSettings = new Set();   // 開いているセクション設定パネルのindex
+
+  function pickSettings(t) { const o = {}; SETTING_KEYS.forEach(k => o[k] = t[k]); return o; }
+  function assignSettings(t, s) { SETTING_KEYS.forEach(k => { if (s[k] != null) t[k] = s[k]; }); }
+  function newSection(c, name) { return Object.assign({ name: name, bars: [{ chords: [] }] }, pickSettings(c.defaults)); }
 
   function chordSymbolsText(song) {
     const c = song.chords;
@@ -376,9 +384,9 @@
     c.sections.forEach(s => (s.bars || []).forEach(b => (b.chords || []).forEach(sym => out.push(sym))));
     return out.join(' ');
   }
-  function preferFlatOf(c) { return ChordLib.preferFlatForKey(ChordLib.tonicPc(c) + (c.transpose || 0)); }
-  function displayName(c, sym) { const tr = c.transpose || 0; return tr === 0 ? sym : ChordLib.transpose(sym, tr, preferFlatOf(c)); }
-  function shapeName(c, sym) { return ChordLib.transpose(displayName(c, sym), -(c.capo || 0), preferFlatOf(c)); }
+  function preferFlatOfSection(sec) { return ChordLib.preferFlatForKey(ChordLib.tonicPcOf(sec) + (sec.transpose || 0)); }
+  function displayNameSec(sec, sym) { const tr = sec.transpose || 0; return tr === 0 ? sym : ChordLib.transpose(sym, tr, preferFlatOfSection(sec)); }
+  function shapeNameSec(sec, sym) { return ChordLib.transpose(displayNameSec(sec, sym), -(sec.capo || 0), preferFlatOfSection(sec)); }
   function fmtSemi(n) { return n > 0 ? '＋' + n : n < 0 ? '−' + Math.abs(n) : '±0'; }
 
   async function saveChords(song) {
@@ -399,43 +407,41 @@
     ChordLib.ensure(song);
     const body = el('div', { class: 'section-body' });
     const playBtn = el('button', { class: 'btn btn-sm btn-primary', text: '▶ 再生' });
+    playBtn._label = '▶ 再生';
     playBtn.addEventListener('click', () => toggleChordPlay(song, body, playBtn));
     const importBtn = el('button', { class: 'btn btn-sm', text: '歌詞から取込', onclick: () => importSectionsFromLyrics(song, body) });
     renderChordBody(song, body);
     return section('コード進行', [importBtn, playBtn], body);
   }
 
-  function renderChordBody(song, body) {
-    if (window.AudioEngine) AudioEngine.stop();
-    const c = song.chords;
-    body.innerHTML = '';
-
-    // 設定バー
-    const bpm = el('input', { type: 'number', min: '20', max: '300', value: String(c.tempo || 90), class: 'chord-num', 'aria-label': 'テンポBPM' });
-    bpm.addEventListener('change', async () => { let v = parseInt(bpm.value, 10); if (isNaN(v)) v = 90; c.tempo = Math.max(20, Math.min(300, v)); bpm.value = String(c.tempo); await saveChords(song); });
+  // 設定コントロール（上部の既定値バー / 各セクションの設定パネル で共用）
+  function buildSettingsControls(song, target, body, o) {
+    o = o || {};
+    const bpm = el('input', { type: 'number', min: '20', max: '300', value: String(target.tempo || 90), class: 'chord-num', 'aria-label': 'テンポBPM' });
+    bpm.addEventListener('change', async () => { let v = parseInt(bpm.value, 10); if (isNaN(v)) v = 90; target.tempo = Math.max(20, Math.min(300, v)); bpm.value = String(target.tempo); await saveChords(song); });
 
     const ts = el('select', { class: 'chord-sel', 'aria-label': '拍子' });
-    TIME_SIGS.forEach(t => ts.appendChild(el('option', { value: t.label, text: t.label, selected: (c.beatsPerBar === t.n && c.beatUnit === t.d) ? 'selected' : null })));
-    ts.addEventListener('change', async () => { const t = TIME_SIGS.find(x => x.label === ts.value); if (t) { c.beatsPerBar = t.n; c.beatUnit = t.d; } await saveChords(song); });
+    TIME_SIGS.forEach(t => ts.appendChild(el('option', { value: t.label, text: t.label, selected: (target.beatsPerBar === t.n && target.beatUnit === t.d) ? 'selected' : null })));
+    ts.addEventListener('change', async () => { const t = TIME_SIGS.find(x => x.label === ts.value); if (t) { target.beatsPerBar = t.n; target.beatUnit = t.d; } await saveChords(song); });
 
     const capo = el('select', { class: 'chord-sel', 'aria-label': 'カポ' });
-    for (let k = 0; k <= 11; k++) capo.appendChild(el('option', { value: String(k), text: k === 0 ? 'カポ なし' : 'カポ ' + k, selected: (c.capo === k) ? 'selected' : null }));
-    capo.addEventListener('change', async () => { c.capo = parseInt(capo.value, 10) || 0; await saveChords(song); renderChordBody(song, body); });
+    for (let k = 0; k <= 11; k++) capo.appendChild(el('option', { value: String(k), text: k === 0 ? 'カポ なし' : 'カポ ' + k, selected: (target.capo === k) ? 'selected' : null }));
+    capo.addEventListener('change', async () => { target.capo = parseInt(capo.value, 10) || 0; await saveChords(song); if (!o.isDefaults) renderChordBody(song, body); });
 
-    const trReadout = el('span', { class: 'chord-tr-val', text: fmtSemi(c.transpose || 0) });
-    const trMinus = el('button', { class: 'btn btn-sm', text: '−', onclick: async () => { c.transpose = Math.max(-11, (c.transpose || 0) - 1); await saveChords(song); renderChordBody(song, body); } });
-    const trPlus = el('button', { class: 'btn btn-sm', text: '＋', onclick: async () => { c.transpose = Math.min(11, (c.transpose || 0) + 1); await saveChords(song); renderChordBody(song, body); } });
+    const trReadout = el('span', { class: 'chord-tr-val', text: fmtSemi(target.transpose || 0) });
+    const trMinus = el('button', { class: 'btn btn-sm', text: '−', onclick: async () => { target.transpose = Math.max(-11, (target.transpose || 0) - 1); await saveChords(song); if (!o.isDefaults) renderChordBody(song, body); else trReadout.textContent = fmtSemi(target.transpose); } });
+    const trPlus = el('button', { class: 'btn btn-sm', text: '＋', onclick: async () => { target.transpose = Math.min(11, (target.transpose || 0) + 1); await saveChords(song); if (!o.isDefaults) renderChordBody(song, body); else trReadout.textContent = fmtSemi(target.transpose); } });
 
     const st = el('select', { class: 'chord-sel', 'aria-label': '再生スタイル' });
-    CHORD_STYLES.forEach(s => st.appendChild(el('option', { value: s.v, text: s.label, selected: (c.style === s.v) ? 'selected' : null })));
-    st.addEventListener('change', async () => { c.style = st.value; await saveChords(song); });
+    CHORD_STYLES.forEach(s => st.appendChild(el('option', { value: s.v, text: s.label, selected: (target.style === s.v) ? 'selected' : null })));
+    st.addEventListener('change', async () => { target.style = st.value; await saveChords(song); });
 
     const loopCb = el('input', { type: 'checkbox' });
-    loopCb.checked = !!c.loop;
-    loopCb.addEventListener('change', async () => { c.loop = loopCb.checked; await saveChords(song); });
-    const loop = el('label', { class: 'chord-loop' }, [loopCb, el('span', { text: 'ループ' })]);
+    loopCb.checked = !!target.loop;
+    loopCb.addEventListener('change', async () => { target.loop = loopCb.checked; await saveChords(song); });
+    const loop = el('label', { class: 'chord-loop', title: 'このセクションを単独再生するときに繰り返します' }, [loopCb, el('span', { text: 'ループ' })]);
 
-    const bar = el('div', { class: 'chord-settings' }, [
+    const wrap = el('div', { class: 'chord-settings' }, [
       fieldInline('テンポ', bpm, 'BPM'),
       fieldInline('拍子', ts),
       fieldInline('カポ', capo),
@@ -443,11 +449,31 @@
       fieldInline('スタイル', st),
       loop,
     ]);
-    body.appendChild(bar);
 
-    if ((c.capo || 0) > 0) {
-      body.appendChild(el('div', { class: 'notice', text: `カポ ${c.capo}：各コードの下段が「押さえるコード」です（上段＝実際の響き）。` }));
+    if (!o.isDefaults) {
+      if ((target.capo || 0) > 0) wrap.appendChild(el('div', { class: 'chord-hint', text: `カポ${target.capo}：各コードの下段が「押さえるコード」（上段＝実際の響き）` }));
+      const copyBtn = el('button', { class: 'btn btn-sm', text: '設定をコピー', onclick: () => { settingsClipboard = pickSettings(target); toast('設定をコピーしました'); } });
+      const pasteBtn = el('button', { class: 'btn btn-sm', text: '設定を貼り付け', onclick: async () => { if (!settingsClipboard) { toast('コピーされた設定がありません'); return; } assignSettings(target, settingsClipboard); await saveChords(song); renderChordBody(song, body); toast('設定を貼り付けました'); } });
+      const allBtn = el('button', { class: 'btn btn-sm', text: 'この設定を全セクションに適用', onclick: async () => { const src = pickSettings(target); song.chords.sections.forEach(s => assignSettings(s, src)); await saveChords(song); renderChordBody(song, body); toast('全セクションに適用しました'); } });
+      wrap.appendChild(el('div', { class: 'chord-copyrow' }, [copyBtn, pasteBtn, allBtn]));
     }
+    return wrap;
+  }
+
+  function renderChordBody(song, body) {
+    if (window.AudioEngine) AudioEngine.stop();
+    const c = song.chords;
+    body.innerHTML = '';
+
+    // 上部：新規セクションの既定値 ＋ 全セクションに適用
+    const defWrap = el('div', { class: 'chord-defaults' }, [
+      el('div', { class: 'chord-defaults-head' }, [
+        el('span', { class: 'chord-defaults-label', text: '新規セクションの既定値' }),
+        el('button', { class: 'btn btn-sm', text: '既定値を全セクションに適用', onclick: async () => { const src = pickSettings(c.defaults); c.sections.forEach(s => assignSettings(s, src)); await saveChords(song); renderChordBody(song, body); toast('既定値を全セクションに適用しました'); } }),
+      ]),
+      buildSettingsControls(song, c.defaults, body, { isDefaults: true }),
+    ]);
+    body.appendChild(defWrap);
 
     if (!c.sections.length) {
       body.appendChild(el('p', { class: 'media-empty', text: 'コード進行はまだありません。「歌詞から取込」または「＋ セクション」で追加してください。' }));
@@ -455,34 +481,47 @@
     c.sections.forEach((sec, si) => body.appendChild(renderChordSection(song, sec, si, body)));
 
     body.appendChild(el('div', { style: 'margin-top:10px' }, [
-      el('button', { class: 'btn btn-sm', text: '＋ セクション', onclick: async () => { c.sections.push({ name: '新しいセクション', bars: [{ chords: [] }] }); await saveChords(song); renderChordBody(song, body); } }),
+      el('button', { class: 'btn btn-sm', text: '＋ セクション', onclick: async () => { openSettings.clear(); c.sections.push(newSection(c, '新しいセクション')); await saveChords(song); renderChordBody(song, body); } }),
     ]));
   }
 
   function renderChordSection(song, sec, si, body) {
     const c = song.chords;
+    const open = openSettings.has(si);
+
+    const secPlay = el('button', { class: 'btn btn-sm', text: '▶', title: 'このセクションを再生' });
+    secPlay._label = '▶';
+    secPlay.addEventListener('click', () => toggleSectionPlay(song, si, body, secPlay));
+
+    const gear = el('button', { class: 'btn btn-sm' + (open ? ' btn-primary' : ''), text: '⚙ 設定', onclick: () => { if (openSettings.has(si)) openSettings.delete(si); else openSettings.add(si); renderChordBody(song, body); } });
+
     const head = el('div', { class: 'chord-section-head' }, [
       el('span', { class: 'chord-section-name', text: sec.name || '（無名）', title: 'クリックで名称変更', onclick: () => renameChordSection(song, sec, body) }),
       el('div', { class: 'chord-section-actions' }, [
+        secPlay, gear,
         el('button', { class: 'btn btn-sm', text: '＋小節', onclick: async () => { sec.bars = sec.bars || []; sec.bars.push({ chords: [] }); await saveChords(song); renderChordBody(song, body); } }),
-        el('button', { class: 'btn btn-sm', text: '↑', onclick: async () => { if (si > 0) { const t = c.sections[si - 1]; c.sections[si - 1] = c.sections[si]; c.sections[si] = t; await saveChords(song); renderChordBody(song, body); } } }),
-        el('button', { class: 'btn btn-sm', text: '↓', onclick: async () => { if (si < c.sections.length - 1) { const t = c.sections[si + 1]; c.sections[si + 1] = c.sections[si]; c.sections[si] = t; await saveChords(song); renderChordBody(song, body); } } }),
-        el('button', { class: 'btn btn-sm btn-danger', text: '×', onclick: async () => { const ok = await confirmDialog('このセクションを削除しますか？', '削除', true); if (!ok) return; c.sections.splice(si, 1); await saveChords(song); renderChordBody(song, body); } }),
+        el('button', { class: 'btn btn-sm', text: '↑', onclick: async () => { if (si > 0) { const t = c.sections[si - 1]; c.sections[si - 1] = c.sections[si]; c.sections[si] = t; openSettings.clear(); await saveChords(song); renderChordBody(song, body); } } }),
+        el('button', { class: 'btn btn-sm', text: '↓', onclick: async () => { if (si < c.sections.length - 1) { const t = c.sections[si + 1]; c.sections[si + 1] = c.sections[si]; c.sections[si] = t; openSettings.clear(); await saveChords(song); renderChordBody(song, body); } } }),
+        el('button', { class: 'btn btn-sm', text: '複製', title: 'このセクションをコード込みで複製', onclick: async () => { const copy = JSON.parse(JSON.stringify(c.sections[si])); copy.name = (copy.name || '') + ' (コピー)'; c.sections.splice(si + 1, 0, copy); openSettings.clear(); await saveChords(song); renderChordBody(song, body); toast('セクションを複製しました'); } }),
+        el('button', { class: 'btn btn-sm btn-danger', text: '×', onclick: async () => { const ok = await confirmDialog('このセクションを削除しますか？', '削除', true); if (!ok) return; c.sections.splice(si, 1); openSettings.clear(); await saveChords(song); renderChordBody(song, body); } }),
       ]),
     ]);
+
+    const nodes = [head];
+    if (open) nodes.push(buildSettingsControls(song, sec, body, { isDefaults: false, si }));
     const grid = el('div', { class: 'bar-grid' });
     (sec.bars || []).forEach((b, bi) => grid.appendChild(renderChordBar(song, sec, si, b, bi, body)));
-    return el('div', { class: 'chord-section' }, [head, grid]);
+    nodes.push(grid);
+    return el('div', { class: 'chord-section' }, nodes);
   }
 
   function renderChordBar(song, sec, si, bar, bi, body) {
-    const c = song.chords;
     const chips = el('div', { class: 'bar-chips' });
     (bar.chords || []).forEach((sym, ci) => {
       const valid = ChordLib.isValid(sym);
       const chip = el('div', { class: 'chord-chip' + (valid ? '' : ' invalid'), 'data-si': si, 'data-bi': bi, 'data-ci': ci, title: valid ? '' : '未知のコード（再生されません）' });
-      chip.appendChild(el('span', { class: 'cc-name', text: displayName(c, sym) }));
-      if ((c.capo || 0) > 0) chip.appendChild(el('span', { class: 'cc-shape', text: shapeName(c, sym) }));
+      chip.appendChild(el('span', { class: 'cc-name', text: displayNameSec(sec, sym) }));
+      if ((sec.capo || 0) > 0) chip.appendChild(el('span', { class: 'cc-shape', text: shapeNameSec(sec, sym) }));
       chip.addEventListener('click', () => editChord(song, bar, ci, body));
       const del = el('button', { class: 'cc-del', text: '×', 'aria-label': 'コード削除' });
       del.addEventListener('click', async (e) => { e.stopPropagation(); bar.chords.splice(ci, 1); await saveChords(song); renderChordBody(song, body); });
@@ -543,45 +582,53 @@
     const c = song.chords;
     const labels = (song.lyrics || '').split('\n').map(l => l.trim()).filter(l => /^\[.+\]$/.test(l));
     if (!labels.length) {
-      if (!c.sections.length) { c.sections.push({ name: '進行', bars: [{ chords: [] }] }); await saveChords(song); renderChordBody(song, body); toast('セクションを1つ作成しました'); }
+      if (!c.sections.length) { c.sections.push(newSection(c, '進行')); await saveChords(song); renderChordBody(song, body); toast('セクションを1つ作成しました'); }
       else { toast('歌詞にセクション記法（[...]）が見つかりません'); }
       return;
     }
     let added = 0;
-    labels.forEach(lb => { if (!c.sections.some(s => s.name === lb)) { c.sections.push({ name: lb, bars: [{ chords: [] }] }); added++; } });
+    labels.forEach(lb => { if (!c.sections.some(s => s.name === lb)) { c.sections.push(newSection(c, lb)); added++; } });
     await saveChords(song); renderChordBody(song, body);
     toast(added ? `${added}個のセクションを追加しました` : '追加するセクションはありませんでした');
   }
 
-  function buildChordList(song) {
-    const c = song.chords; const list = []; const bpb = c.beatsPerBar || 4; const tr = c.transpose || 0;
-    (c.sections || []).forEach((s, si) => (s.bars || []).forEach((b, bi) => {
+  // 1セクションを再生アイテム列へ（tempo/style/transpose はセクション設定）
+  function sectionToItems(s, si, list) {
+    const bpb = s.beatsPerBar || 4; const tr = s.transpose || 0;
+    (s.bars || []).forEach((b, bi) => {
       const chs = (b.chords || []);
-      if (!chs.length) { list.push({ freqs: [], beats: bpb, ref: { si, bi, ci: -1 } }); }
-      else { const per = bpb / chs.length; chs.forEach((sym, ci) => { const sounded = tr === 0 ? sym : ChordLib.transpose(sym, tr, false); list.push({ freqs: ChordLib.freqs(sounded), beats: per, ref: { si, bi, ci } }); }); }
-    }));
-    return list;
+      if (!chs.length) { list.push({ freqs: [], beats: bpb, tempo: s.tempo, style: s.style, ref: { si, bi, ci: -1 } }); }
+      else { const per = bpb / chs.length; chs.forEach((sym, ci) => { const sounded = tr === 0 ? sym : ChordLib.transpose(sym, tr, false); list.push({ freqs: ChordLib.freqs(sounded), beats: per, tempo: s.tempo, style: s.style, ref: { si, bi, ci } }); }); }
+    });
   }
+  function buildChordList(song) { const list = []; (song.chords.sections || []).forEach((s, si) => sectionToItems(s, si, list)); return list; }
+  function buildSectionList(song, si) { const list = []; sectionToItems(song.chords.sections[si], si, list); return list; }
 
-  function toggleChordPlay(song, body, playBtn) {
-    if (chordPlaying) { AudioEngine.stop(); return; }
+  function playList(song, body, list, opts, btn) {
     if (!window.AudioEngine || !AudioEngine.isSupported()) { toast('このブラウザは音声再生に非対応です'); return; }
-    const list = buildChordList(song);
     if (!list.some(x => x.freqs.length)) { toast('再生できるコードがありません'); return; }
-    const c = song.chords;
     const clearHL = () => body.querySelectorAll('.chord-chip.playing').forEach(n => n.classList.remove('playing'));
-    chordPlaying = true; playBtn.textContent = '■ 停止';
-    AudioEngine.play(list, {
-      tempo: c.tempo, style: c.style, loop: c.loop,
+    const started = AudioEngine.play(list, Object.assign({
       onStep: (i) => {
         clearHL();
         if (i < 0) return;
-        const ref = list[i].ref; if (ref.ci < 0) return;
+        const ref = list[i].ref; if (!ref || ref.ci < 0) return;
         const chip = body.querySelector(`.chord-chip[data-si="${ref.si}"][data-bi="${ref.bi}"][data-ci="${ref.ci}"]`);
         if (chip) chip.classList.add('playing');
       },
-      onEnd: () => { chordPlaying = false; playBtn.textContent = '▶ 再生'; clearHL(); },
-    });
+      onEnd: () => { chordPlaying = false; if (activePlayBtn) activePlayBtn.textContent = activePlayBtn._label || '▶ 再生'; activePlayBtn = null; clearHL(); },
+    }, opts));
+    if (started) { chordPlaying = true; activePlayBtn = btn; btn.textContent = btn._label === '▶' ? '■' : '■ 停止'; }
+  }
+
+  function toggleChordPlay(song, body, playBtn) {
+    if (chordPlaying && activePlayBtn === playBtn) { AudioEngine.stop(); return; }
+    playList(song, body, buildChordList(song), { loop: false }, playBtn);
+  }
+  function toggleSectionPlay(song, si, body, btn) {
+    if (chordPlaying && activePlayBtn === btn) { AudioEngine.stop(); return; }
+    const s = song.chords.sections[si];
+    playList(song, body, buildSectionList(song, si), { loop: !!s.loop }, btn);
   }
 
   // ==========================================================
