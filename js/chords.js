@@ -185,9 +185,53 @@
     return 0;
   }
 
+  // コードの種類（三度・五度から大別）
+  function chordType(intervals) {
+    const has = (n) => intervals.indexOf(n) >= 0;
+    if (has(3) && has(6)) return 'dim';
+    if (has(3)) return 'min';
+    if (has(4)) return 'maj';
+    return 'amb'; // sus等（三度なし）
+  }
+
+  // コード進行からキー（長調＋平行短調）を推定する。コード無しは null。
+  //   各長調のダイアトニック度数・想定クオリティとの一致でスコアリング。
+  function estimateKey(chords) {
+    if (!chords || !Array.isArray(chords.sections)) return null;
+    const arr = [];
+    chords.sections.forEach(s => {
+      const tr = s.transpose || 0;
+      (s.bars || []).forEach(b => (b.chords || []).forEach(sym => {
+        const p = parse(sym);
+        if (p) arr.push({ pc: (p.rootPc + tr + 120) % 12, type: chordType(p.quality.intervals) });
+      }));
+    });
+    if (!arr.length) return null;
+
+    const MAJ = [0, 2, 4, 5, 7, 9, 11];
+    const DEGQ = { 0: 'maj', 2: 'min', 4: 'min', 5: 'maj', 7: 'maj', 9: 'min', 11: 'dim' };
+    let best = -Infinity, bestR = 0;
+    for (let r = 0; r < 12; r++) {
+      let score = 0;
+      arr.forEach(({ pc, type }) => {
+        const deg = (pc - r + 12) % 12;
+        if (MAJ.indexOf(deg) >= 0) {
+          score += 1;
+          if (type !== 'amb') { if (DEGQ[deg] === type) score += 1; else score -= 0.3; }
+        } else { score -= 1; }
+      });
+      if (arr.some(x => x.pc === r)) score += 0.5;              // トニック存在
+      if (arr.some(x => x.pc === (r + 7) % 12)) score += 0.3;   // ドミナント存在
+      if (score > best) { best = score; bestR = r; }
+    }
+    const minorR = (bestR + 9) % 12;
+    const flat = preferFlatForKey(bestR);
+    return { majorPc: bestR, minorPc: minorR, majorName: spell(bestR, flat), minorName: spell(minorR, flat) + 'm', confidence: best };
+  }
+
   global.ChordLib = {
     parse, pcs, freqs, transpose, spell, preferFlatForKey, noteToFreq, isValid,
-    defaultSettings, defaultProgression, ensure, tonicPc, tonicPcOf,
+    defaultSettings, defaultProgression, ensure, tonicPc, tonicPcOf, estimateKey,
     QUALITIES, ROOTS, SHARP, FLAT,
   };
 })(window);

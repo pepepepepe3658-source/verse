@@ -280,6 +280,25 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border: none;
 .chord-input { width: 100%; background: var(--c-bg); color: var(--c-text); border: 1px solid var(--c-border-2); border-radius: var(--radius-sm); padding: 9px 11px; font: inherit; }
 .chord-preview { font-size: 12px; color: var(--c-text-3); margin-top: 6px; min-height: 16px; }
 
+/* ===== 録音・クイックキャプチャ・歌本・推定キー ===== */
+.chord-key { font-size: 13px; font-weight: 600; color: var(--c-text); background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm); padding: 6px 10px; margin-bottom: 12px; display: inline-block; }
+.rec-body { text-align: center; padding: 10px 0; }
+.rec-line { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 28px; font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+.rec-time { color: var(--c-text); }
+.rec-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--c-text-3); }
+.rec-dot.on { background: var(--c-text); animation: recpulse 1s infinite; }
+@keyframes recpulse { 0%,100%{opacity:1;} 50%{opacity:.25;} }
+.rec-status { font-size: 13px; color: var(--c-text-2); }
+.qc-memo { min-height: 140px; resize: vertical; line-height: 1.7; }
+.qc-rec { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; }
+.qc-rec-status { font-size: 12px; color: var(--c-text-3); }
+.sb-key { font-size: 13px; font-weight: 600; color: var(--c-text-2); margin-bottom: 12px; }
+.songbook { line-height: 1.9; }
+.sb-label { display: inline-block; margin: 16px 0 4px; padding: 2px 10px; font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--c-on-accent); background: var(--c-text-2); border-radius: 5px; }
+.sb-label:first-child { margin-top: 0; }
+.sb-chords { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; font-weight: 700; color: var(--c-text); white-space: pre-wrap; word-break: break-word; margin: 2px 0 4px; }
+.sb-lyric { font-size: 16px; white-space: pre-wrap; word-break: break-word; }
+
 /* ===== レスポンシブ（スマホ） ===== */
 .only-mobile { display: none; }
 

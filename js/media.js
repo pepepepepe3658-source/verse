@@ -16,6 +16,7 @@
 
   // 拡張子推定（バックアップ時のファイル名に使用）
   function extFromMime(mime, fallbackName) {
+    const base = String(mime || '').split(';')[0].trim(); // "audio/webm;codecs=opus" → "audio/webm"
     const map = {
       'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a',
       'audio/aac': 'aac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg',
@@ -23,9 +24,22 @@
       'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
       'video/x-matroska': 'mkv', 'video/ogg': 'ogv', 'video/3gpp': '3gp',
     };
-    if (map[mime]) return map[mime];
+    if (map[base]) return map[base];
     if (fallbackName && fallbackName.includes('.')) return fallbackName.split('.').pop().toLowerCase();
     return 'bin';
+  }
+
+  // 録音Blobを音声として保存（アプリ内録音・クイックキャプチャで使用）
+  async function saveRecording(songId, blob, mime) {
+    const now = new Date(); const p = (n) => String(n).padStart(2, '0');
+    const name = '録音 ' + now.getFullYear() + '/' + p(now.getMonth() + 1) + '/' + p(now.getDate()) + ' ' + p(now.getHours()) + ':' + p(now.getMinutes());
+    const rec = {
+      id: DB.uid('m_'), songId, kind: 'audio', name,
+      mime: mime || blob.type || 'audio/webm', size: blob.size, blob,
+      createdAt: new Date().toISOString(),
+    };
+    await DB.Media.put(rec);
+    return rec;
   }
 
   // File[] を保存
@@ -121,5 +135,5 @@
     return { el: wrap, destroy };
   }
 
-  global.MediaLib = { saveFiles, createPlayer, fmtTime, extFromMime };
+  global.MediaLib = { saveFiles, saveRecording, createPlayer, fmtTime, extFromMime };
 })(window);

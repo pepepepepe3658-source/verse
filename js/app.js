@@ -180,6 +180,7 @@
     const header = el('div', { class: 'detail-header' }, [
       el('h2', { class: 'detail-title', text: song.title || '(無題)' }),
       el('div', { class: 'detail-actions' }, [
+        el('button', { class: 'btn btn-sm', text: '歌本', title: '歌詞とコードをまとめて表示', onclick: () => openSongbook(song) }),
         el('button', { class: 'btn btn-sm', text: '編集', onclick: () => openSongForm(song) }),
         el('button', { class: 'btn btn-sm btn-danger', text: '削除', onclick: () => deleteSong(song) }),
       ]),
@@ -250,6 +251,10 @@
       fileInput.value = '';
     });
     const addBtn = el('button', { class: 'btn btn-sm', text: '＋ アップロード', onclick: () => fileInput.click() });
+    const headActions = [addBtn];
+    if (kind === 'audio' && window.Recorder && Recorder.isSupported()) {
+      headActions.unshift(el('button', { class: 'btn btn-sm', text: '● 録音', onclick: () => recordIntoSong(song) }));
+    }
 
     const body = el('div', { class: 'section-body' });
     body.appendChild(fileInput);
@@ -266,7 +271,85 @@
       for (const m of media) list.appendChild(mediaItem(m, song));
       body.appendChild(list);
     }
-    return section(title, [addBtn], body);
+    return section(title, headActions, body);
+  }
+
+  // 録音モーダル（録音開始→停止で {blob,mime} を onDone に渡す）
+  function openRecorder(onDone) {
+    if (!window.Recorder || !Recorder.isSupported()) { toast('このブラウザは録音に非対応です'); return; }
+    const dot = el('span', { class: 'rec-dot' });
+    const timeEl = el('span', { class: 'rec-time', text: '0:00' });
+    const status = el('div', { class: 'rec-status', text: 'マイクを準備中…（許可が必要です）' });
+    const stopBtn = el('button', { class: 'btn btn-primary', text: '■ 停止して保存', disabled: 'disabled' });
+    const cancelBtn = el('button', { class: 'btn', text: 'キャンセル' });
+    let done = false;
+    cancelBtn.addEventListener('click', () => { if (!done) Recorder.cancel(); closeModal(); });
+    stopBtn.addEventListener('click', async () => {
+      if (done) return; done = true;
+      try { const r = await Recorder.stop(); closeModal(); onDone(r); }
+      catch (e) { closeModal(); toast('録音の保存に失敗しました'); }
+    });
+    const body = el('div', { class: 'rec-body' }, [el('div', { class: 'rec-line' }, [dot, timeEl]), status]);
+    openModal('録音', body, [cancelBtn, stopBtn]);
+    Recorder.start((sec) => { timeEl.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); })
+      .then(() => { status.textContent = '録音中… 「停止して保存」で保存します'; stopBtn.disabled = false; dot.classList.add('on'); })
+      .catch(() => { status.textContent = 'マイクを使用できませんでした（権限を確認してください）'; });
+  }
+
+  function recordIntoSong(song) {
+    openRecorder(async ({ blob, mime }) => {
+      try { await MediaLib.saveRecording(song.id, blob, mime); toast('録音を保存しました'); await renderDetail(); refreshStorageBadge(); }
+      catch (e) { handleSaveError(e); }
+    });
+  }
+
+  // 歌本ビュー：歌詞を[..]で分割し、各ブロックに名前一致するコード行＋歌詞を合成表示（読み取り専用）
+  function parseLyricBlocks(lyrics) {
+    const lines = (lyrics || '').split('\n');
+    const blocks = []; let cur = null;
+    lines.forEach(raw => {
+      const t = raw.trim();
+      if (/^\[.+\]$/.test(t)) { cur = { label: t, lines: [] }; blocks.push(cur); }
+      else { if (!cur) { cur = { label: '', lines: [] }; blocks.push(cur); } cur.lines.push(raw); }
+    });
+    return blocks;
+  }
+  function chordLineFor(sec) {
+    const parts = (sec.bars || []).map(b => {
+      const chs = (b.chords || []);
+      return chs.length ? chs.map(sym => displayNameSec(sec, sym)).join(' ') : '－';
+    });
+    return el('div', { class: 'sb-chords', text: parts.length ? '｜' + parts.join('｜') + '｜' : '（コードなし）' });
+  }
+  function openSongbook(song) {
+    ChordLib.ensure(song);
+    const c = song.chords;
+    const blocks = parseLyricBlocks(song.lyrics);
+    const container = el('div', { class: 'songbook' });
+    const usedSecs = new Set();
+    blocks.forEach(bl => {
+      if (bl.label) {
+        container.appendChild(el('div', { class: 'sb-label', text: bl.label }));
+        const sec = c.sections.find(s => s.name === bl.label);
+        if (sec) { usedSecs.add(sec); container.appendChild(chordLineFor(sec)); }
+      }
+      bl.lines.forEach(ln => container.appendChild(el('div', { class: 'sb-lyric', text: ln || ' ' })));
+    });
+    // 歌詞に対応が無いコードセクションは末尾にコードのみ表示
+    c.sections.forEach(sec => {
+      if (!usedSecs.has(sec) && sec.name) {
+        container.appendChild(el('div', { class: 'sb-label', text: sec.name }));
+        container.appendChild(chordLineFor(sec));
+      }
+    });
+    if (!blocks.length && !c.sections.length) {
+      container.appendChild(el('p', { class: 'media-empty', text: '歌詞・コードがまだありません。' }));
+    }
+    const key = ChordLib.estimateKey(c);
+    const footer = [el('button', { class: 'btn btn-primary', text: '閉じる', onclick: closeModal })];
+    const head = key ? el('div', { class: 'sb-key', text: '推定キー：' + key.majorName + ' / ' + key.minorName }) : null;
+    const wrap = el('div', {}, [head, container]);
+    openModal('歌本ビュー（' + (song.title || '(無題)') + '）', wrap, footer);
   }
 
   function mediaItem(m, song) {
@@ -474,6 +557,10 @@
       buildSettingsControls(song, c.defaults, body, { isDefaults: true }),
     ]);
     body.appendChild(defWrap);
+
+    // 推定キー
+    const key = ChordLib.estimateKey(c);
+    if (key) body.appendChild(el('div', { class: 'chord-key', text: '推定キー：' + key.majorName + ' メジャー / ' + key.minorName.replace(/m$/, '') + ' マイナー' }));
 
     if (!c.sections.length) {
       body.appendChild(el('p', { class: 'media-empty', text: 'コード進行はまだありません。「歌詞から取込」または「＋ セクション」で追加してください。' }));
@@ -957,9 +1044,54 @@
     renderList();
   }
 
+  // ==========================================================
+  // クイックキャプチャ（録音＋メモ → 新規曲を自動作成）
+  // ==========================================================
+  function openQuickCapture() {
+    const memo = el('textarea', { class: 'chord-input qc-memo', placeholder: '思いついた歌詞・アイデアをメモ…' });
+    let recorded = null;
+    const recSupported = !!(window.Recorder && Recorder.isSupported());
+    const recStatus = el('span', { class: 'qc-rec-status', text: recSupported ? '' : '（このブラウザは録音に非対応）' });
+    const recBtn = el('button', {
+      class: 'btn btn-sm', text: '● 録音', disabled: recSupported ? null : 'disabled',
+      onclick: () => openRecorder((r) => { recorded = r; recStatus.textContent = '録音あり（保存時に追加されます）'; })
+    });
+    const body = el('div', {}, [
+      el('div', { class: 'field' }, [el('label', { text: 'メモ（歌詞・アイデア）' }), memo]),
+      el('div', { class: 'qc-rec' }, [recBtn, recStatus]),
+      el('div', { class: 'hint', text: '保存すると「無題（日付）」の新しい曲として作成されます。あとで曲名や情報を整理できます。' }),
+    ]);
+    const cancel = el('button', { class: 'btn', text: 'キャンセル', onclick: closeModal });
+    const save = el('button', {
+      class: 'btn btn-primary', text: '保存',
+      onclick: async () => {
+        const text = memo.value.trim();
+        if (!text && !recorded) { toast('メモを入力するか録音してください'); return; }
+        const now = new Date(); const p = (n) => String(n).padStart(2, '0');
+        const title = '無題 ' + now.getFullYear() + '/' + p(now.getMonth() + 1) + '/' + p(now.getDate()) + ' ' + p(now.getHours()) + ':' + p(now.getMinutes());
+        const iso = now.toISOString();
+        const created = { id: DB.uid('s_'), title, status: STATUSES[0], tags: [], lyrics: text, createdAt: iso, updatedAt: iso };
+        try {
+          await DB.Songs.put(created);
+          if (recorded) await MediaLib.saveRecording(created.id, recorded.blob, recorded.mime);
+          closeModal();
+          state.selectedId = created.id;
+          await reload();
+          document.body.classList.add('detail-open'); $('btnBack').hidden = false;
+          await renderDetail();
+          toast('保存しました');
+          refreshStorageBadge();
+        } catch (e) { handleSaveError(e); }
+      }
+    });
+    openModal('クイックキャプチャ', body, [cancel, save]);
+    setTimeout(() => memo.focus(), 30);
+  }
+
   function bindGlobal() {
     searchInput.addEventListener('input', () => { state.query = searchInput.value; renderList(); });
     $('btnNew').addEventListener('click', () => openSongForm(null));
+    $('btnQuick').addEventListener('click', openQuickCapture);
     $('btnStorage').addEventListener('click', openStorageModal);
     $('btnData').addEventListener('click', openDataModal);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('modalOverlay').hidden) closeModal(); });
