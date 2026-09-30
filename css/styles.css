@@ -247,10 +247,10 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border: none;
 .chord-hint { width: 100%; font-size: 11px; color: var(--c-text-3); }
 
 .chord-section { border: 1px solid var(--c-border); border-radius: var(--radius-sm); margin-bottom: 12px; overflow: hidden; }
-.chord-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--c-surface-2); border-bottom: 1px solid var(--c-border); }
-.chord-section-name { font-weight: 700; font-size: 13px; cursor: pointer; padding: 2px 6px; border-radius: 5px; }
+.chord-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--c-surface-2); border-bottom: 1px solid var(--c-border); flex-wrap: wrap; }
+.chord-section-name { font-weight: 700; font-size: 13px; cursor: pointer; padding: 2px 6px; border-radius: 5px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chord-section-name:hover { background: var(--c-border); }
-.chord-section-actions { display: flex; gap: 4px; flex: none; }
+.chord-section-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 
 .bar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; padding: 10px; }
 .bar-box { border: 1px solid var(--c-border-2); border-radius: var(--radius-sm); background: var(--c-bg); padding: 6px; display: flex; flex-direction: column; gap: 6px; min-height: 78px; }
