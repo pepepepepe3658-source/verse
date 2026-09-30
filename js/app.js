@@ -642,27 +642,77 @@
   }
 
   function openChordPicker(title, initial, onOk) {
+    let accidental = /^[A-G]b/.test(initial || '') ? 'flat' : 'sharp';
+    let curRoot = 'C', curSuffix = '', curBass = '';
+    const p0 = ChordLib.parse(initial || '');
+    if (p0) {
+      curRoot = ChordLib.spell(p0.rootPc, accidental === 'flat');
+      curSuffix = p0.suffix;
+      if (p0.bassPc != null) curBass = ChordLib.spell(p0.bassPc, accidental === 'flat');
+    }
+
     const text = el('input', { type: 'text', value: initial || '', placeholder: '例: C, Am, G7, Cmaj7, Fsus4', class: 'chord-input' });
     const preview = el('div', { class: 'chord-preview' });
-    function upd() { const v = text.value.trim(); preview.textContent = v ? (ChordLib.isValid(v) ? '✓ ' + v : '⚠ 未知のコード（そのまま表示・再生はスキップ）') : ''; }
-    let curRoot = 'C', curSuffix = '';
-    const p0 = ChordLib.parse(initial || ''); if (p0) { curRoot = ChordLib.spell(p0.rootPc, false); curSuffix = p0.suffix; }
-    function compose() { text.value = curRoot + curSuffix; upd(); }
-    text.addEventListener('input', upd);
+    const bigPrev = el('div', { class: 'chord-bigpreview' });
+    const rootRow = el('div', { class: 'palette' });
+    const qualWrap = el('div', { class: 'qual-palette' });
+    const bassSel = el('select', { class: 'chord-sel' });
 
-    const roots = el('div', { class: 'palette' });
-    ChordLib.ROOTS.forEach(r => roots.appendChild(el('button', { class: 'btn btn-sm pal', text: r, onclick: () => { curRoot = r; compose(); } })));
-    const quals = el('div', { class: 'palette' });
-    ChordLib.QUALITIES.forEach(q => quals.appendChild(el('button', { class: 'btn btn-sm pal', text: q.suffix || 'maj', onclick: () => { curSuffix = q.suffix; compose(); } })));
+    const rootNames = () => (accidental === 'flat' ? ChordLib.FLAT : ChordLib.SHARP);
+
+    function updatePreview() {
+      const v = text.value.trim();
+      const ok = v ? ChordLib.isValid(v) : false;
+      bigPrev.textContent = v || '—';
+      bigPrev.className = 'chord-bigpreview' + (v && !ok ? ' invalid' : '');
+      preview.textContent = v ? (ok ? '✓ 有効なコード' : '⚠ 未知のコード（そのまま表示・再生はスキップ）') : '';
+    }
+    function buildRoots() {
+      rootRow.innerHTML = '';
+      rootNames().forEach(r => rootRow.appendChild(el('button', { class: 'btn btn-sm pal' + (r === curRoot ? ' active' : ''), text: r, onclick: () => { curRoot = r; compose(); } })));
+    }
+    function buildQuals() {
+      qualWrap.innerHTML = '';
+      ChordLib.QUALITY_CATS.forEach(([cat, label]) => {
+        const items = ChordLib.QUALITIES.filter(q => q.cat === cat);
+        if (!items.length) return;
+        qualWrap.appendChild(el('div', { class: 'pal-cat', text: label }));
+        const row = el('div', { class: 'palette' });
+        items.forEach(q => row.appendChild(el('button', { class: 'btn btn-sm pal' + (q.suffix === curSuffix ? ' active' : ''), text: q.suffix || 'maj', onclick: () => { curSuffix = q.suffix; compose(); } })));
+        qualWrap.appendChild(row);
+      });
+    }
+    function buildBass() {
+      bassSel.innerHTML = '';
+      bassSel.appendChild(el('option', { value: '', text: '（分数なし）', selected: curBass === '' ? 'selected' : null }));
+      rootNames().forEach(n => bassSel.appendChild(el('option', { value: n, text: '/ ' + n, selected: n === curBass ? 'selected' : null })));
+    }
+    bassSel.addEventListener('change', () => { curBass = bassSel.value; compose(); });
+
+    function compose() { text.value = curRoot + curSuffix + (curBass ? '/' + curBass : ''); buildRoots(); buildQuals(); buildBass(); updatePreview(); }
+    text.addEventListener('input', updatePreview);
+
+    const toggle = el('button', { class: 'btn btn-sm', text: accidental === 'flat' ? '♭表記' : '♯表記', title: '♯/♭ 切替' });
+    toggle.addEventListener('click', () => {
+      accidental = accidental === 'flat' ? 'sharp' : 'flat';
+      toggle.textContent = accidental === 'flat' ? '♭表記' : '♯表記';
+      const pr = ChordLib.parse(curRoot); if (pr) curRoot = ChordLib.spell(pr.rootPc, accidental === 'flat');
+      if (curBass) { const pb = ChordLib.parse(curBass); if (pb) curBass = ChordLib.spell(pb.rootPc, accidental === 'flat'); }
+      compose();
+    });
+
+    buildRoots(); buildQuals(); buildBass(); updatePreview();
 
     const bodyEl = el('div', {}, [
+      bigPrev,
       el('div', { class: 'field' }, [el('label', { text: 'コード（直接入力も可）' }), text, preview]),
-      el('label', { class: 'chord-pal-label', text: 'ルート' }), roots,
-      el('label', { class: 'chord-pal-label', text: '種類' }), quals,
+      el('div', { class: 'chord-pal-head' }, [el('label', { class: 'chord-pal-label', text: 'ルート' }), toggle]),
+      rootRow,
+      el('label', { class: 'chord-pal-label', text: '種類' }), qualWrap,
+      el('div', { class: 'field' }, [el('label', { text: 'オンベース（分数コード）' }), bassSel]),
     ]);
     const cancel = el('button', { class: 'btn', text: 'キャンセル', onclick: closeModal });
     const ok = el('button', { class: 'btn btn-primary', text: '決定', onclick: () => { const v = text.value.trim(); if (!v) { toast('コードを入力してください'); return; } closeModal(); onOk(v); } });
-    upd();
     openModal(title, bodyEl, [cancel, ok]);
     setTimeout(() => text.focus(), 30);
   }

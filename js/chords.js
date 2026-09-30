@@ -19,26 +19,51 @@
   // クオリティ定義（suffix=表示, intervals=ルートからの半音, aliases=解析用の別表記）
   // ※ m と M は大文字小文字を区別する（m=マイナー, M/maj=メジャー）
   const QUALITIES = [
-    { suffix: '',      label: 'major',  intervals: [0, 4, 7],        aliases: ['maj', 'M'] },
-    { suffix: 'm',     label: 'minor',  intervals: [0, 3, 7],        aliases: ['min', '-'] },
-    { suffix: '7',     label: '7',      intervals: [0, 4, 7, 10],    aliases: ['dom7'] },
-    { suffix: 'm7',    label: 'm7',     intervals: [0, 3, 7, 10],    aliases: ['min7', '-7'] },
-    { suffix: 'maj7',  label: 'maj7',   intervals: [0, 4, 7, 11],    aliases: ['M7', 'major7'] },
-    { suffix: '6',     label: '6',      intervals: [0, 4, 7, 9],     aliases: [] },
-    { suffix: 'm6',    label: 'm6',     intervals: [0, 3, 7, 9],     aliases: ['min6'] },
-    { suffix: 'sus4',  label: 'sus4',   intervals: [0, 5, 7],        aliases: ['sus'] },
-    { suffix: 'sus2',  label: 'sus2',   intervals: [0, 2, 7],        aliases: [] },
-    { suffix: '7sus4', label: '7sus4',  intervals: [0, 5, 7, 10],    aliases: ['7sus'] },
-    { suffix: 'dim',   label: 'dim',    intervals: [0, 3, 6],        aliases: ['o'] },
-    { suffix: 'dim7',  label: 'dim7',   intervals: [0, 3, 6, 9],     aliases: ['o7'] },
-    { suffix: 'm7b5',  label: 'm7b5',   intervals: [0, 3, 6, 10],    aliases: ['m7-5'] },
-    { suffix: 'aug',   label: 'aug',    intervals: [0, 4, 8],        aliases: ['+', 'aug5'] },
-    { suffix: 'add9',  label: 'add9',   intervals: [0, 4, 7, 14],    aliases: ['add2'] },
-    { suffix: 'madd9', label: 'madd9',  intervals: [0, 3, 7, 14],    aliases: ['madd2'] },
-    { suffix: '9',     label: '9',      intervals: [0, 4, 7, 10, 14], aliases: [] },
-    { suffix: 'm9',    label: 'm9',     intervals: [0, 3, 7, 10, 14], aliases: ['min9'] },
-    { suffix: 'maj9',  label: 'maj9',   intervals: [0, 4, 7, 11, 14], aliases: ['M9'] },
-    { suffix: '69',    label: '6/9',    intervals: [0, 4, 7, 9, 14], aliases: ['6/9'] },
+    // --- 三和音 ---
+    { suffix: '',      cat: 'triad', intervals: [0, 4, 7],            aliases: ['maj', 'M'] },
+    { suffix: 'm',     cat: 'triad', intervals: [0, 3, 7],            aliases: ['min', '-'] },
+    { suffix: 'dim',   cat: 'triad', intervals: [0, 3, 6],            aliases: ['o', '°'] },
+    { suffix: 'aug',   cat: 'triad', intervals: [0, 4, 8],            aliases: ['+', 'aug5', '#5'] },
+    { suffix: 'sus4',  cat: 'triad', intervals: [0, 5, 7],            aliases: ['sus'] },
+    { suffix: 'sus2',  cat: 'triad', intervals: [0, 2, 7],            aliases: [] },
+    { suffix: '5',     cat: 'triad', intervals: [0, 7],               aliases: [] },
+    // --- 6th ---
+    { suffix: '6',     cat: '6th',   intervals: [0, 4, 7, 9],         aliases: [] },
+    { suffix: 'm6',    cat: '6th',   intervals: [0, 3, 7, 9],         aliases: ['min6'] },
+    { suffix: '69',    cat: '6th',   intervals: [0, 4, 7, 9, 14],     aliases: ['6/9'] },
+    // --- 7th ---
+    { suffix: '7',     cat: '7th',   intervals: [0, 4, 7, 10],        aliases: ['dom7'] },
+    { suffix: 'maj7',  cat: '7th',   intervals: [0, 4, 7, 11],        aliases: ['M7', 'major7', '△7', '△'] },
+    { suffix: 'm7',    cat: '7th',   intervals: [0, 3, 7, 10],        aliases: ['min7', '-7'] },
+    { suffix: 'm7b5',  cat: '7th',   intervals: [0, 3, 6, 10],        aliases: ['m7-5', 'ø', 'min7b5'] },
+    { suffix: 'dim7',  cat: '7th',   intervals: [0, 3, 6, 9],         aliases: ['o7', '°7'] },
+    { suffix: 'mM7',   cat: '7th',   intervals: [0, 3, 7, 11],        aliases: ['mMaj7', 'minmaj7', '-△7'] },
+    { suffix: '7sus4', cat: '7th',   intervals: [0, 5, 7, 10],        aliases: ['7sus'] },
+    { suffix: '7b5',   cat: '7th',   intervals: [0, 4, 6, 10],        aliases: ['7-5'] },
+    { suffix: '7#5',   cat: '7th',   intervals: [0, 4, 8, 10],        aliases: ['aug7', '+7', '7+5'] },
+    // --- 9th ---
+    { suffix: 'add9',  cat: '9th',   intervals: [0, 4, 7, 14],        aliases: ['add2'] },
+    { suffix: 'madd9', cat: '9th',   intervals: [0, 3, 7, 14],        aliases: ['madd2'] },
+    { suffix: '9',     cat: '9th',   intervals: [0, 4, 7, 10, 14],    aliases: [] },
+    { suffix: 'maj9',  cat: '9th',   intervals: [0, 4, 7, 11, 14],    aliases: ['M9'] },
+    { suffix: 'm9',    cat: '9th',   intervals: [0, 3, 7, 10, 14],    aliases: ['min9'] },
+    { suffix: '9sus4', cat: '9th',   intervals: [0, 5, 7, 10, 14],    aliases: ['9sus'] },
+    { suffix: '7b9',   cat: '9th',   intervals: [0, 4, 7, 10, 13],    aliases: ['7(b9)'] },
+    { suffix: '7#9',   cat: '9th',   intervals: [0, 4, 7, 10, 15],    aliases: ['7(#9)'] },
+    // --- 11th・13th ---
+    { suffix: '11',    cat: '11-13', intervals: [0, 7, 10, 14, 17],   aliases: [] },
+    { suffix: 'm11',   cat: '11-13', intervals: [0, 3, 7, 10, 14, 17], aliases: ['min11'] },
+    { suffix: 'maj11', cat: '11-13', intervals: [0, 4, 7, 11, 14, 17], aliases: ['M11'] },
+    { suffix: 'add11', cat: '11-13', intervals: [0, 4, 7, 17],        aliases: [] },
+    { suffix: '7#11',  cat: '11-13', intervals: [0, 4, 7, 10, 18],    aliases: ['7(#11)'] },
+    { suffix: 'maj7#11', cat: '11-13', intervals: [0, 4, 7, 11, 18],  aliases: ['M7#11'] },
+    { suffix: '13',    cat: '11-13', intervals: [0, 4, 7, 10, 14, 21], aliases: [] },
+    { suffix: 'm13',   cat: '11-13', intervals: [0, 3, 7, 10, 14, 21], aliases: ['min13'] },
+    { suffix: 'maj13', cat: '11-13', intervals: [0, 4, 7, 11, 14, 21], aliases: ['M13'] },
+    { suffix: '7b13',  cat: '11-13', intervals: [0, 4, 7, 10, 20],    aliases: ['7(b13)'] },
+  ];
+  const QUALITY_CATS = [
+    ['triad', '三和音'], ['6th', '6th'], ['7th', '7th'], ['9th', '9th'], ['11-13', '11th・13th'],
   ];
 
   const ROOTS = SHARP.slice(); // パレットのルート候補（表示はSHARP、必要に応じ移調で♭化）
@@ -232,6 +257,6 @@
   global.ChordLib = {
     parse, pcs, freqs, transpose, spell, preferFlatForKey, noteToFreq, isValid,
     defaultSettings, defaultProgression, ensure, tonicPc, tonicPcOf, estimateKey,
-    QUALITIES, ROOTS, SHARP, FLAT,
+    QUALITIES, QUALITY_CATS, ROOTS, SHARP, FLAT,
   };
 })(window);

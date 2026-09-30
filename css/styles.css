@@ -276,6 +276,13 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border: none;
 
 .palette { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 12px; }
 .palette .pal { padding: 5px 9px; font-size: 13px; }
+.qual-palette { margin: 4px 0 8px; }
+.qual-palette .palette { margin: 2px 0 8px; }
+.pal-cat { font-size: 11px; color: var(--c-text-3); margin-top: 6px; }
+.palette .pal.active { background: var(--c-accent); color: var(--c-on-accent); border-color: var(--c-accent); font-weight: 700; }
+.chord-pal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.chord-bigpreview { font-size: 30px; font-weight: 700; text-align: center; padding: 10px; border: 1px solid var(--c-border-2); border-radius: var(--radius-sm); margin-bottom: 12px; letter-spacing: .02em; background: var(--c-bg); }
+.chord-bigpreview.invalid { color: var(--c-text-3); border-style: dashed; }
 .chord-pal-label { display: block; font-size: 11px; color: var(--c-text-2); margin-top: 6px; }
 .chord-input { width: 100%; background: var(--c-bg); color: var(--c-text); border: 1px solid var(--c-border-2); border-radius: var(--radius-sm); padding: 9px 11px; font: inherit; }
 .chord-preview { font-size: 12px; color: var(--c-text-3); margin-top: 6px; min-height: 16px; }
