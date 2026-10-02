@@ -404,14 +404,8 @@
   }
 
   // ==========================================================
-  // カラオケ同期（タップ記録・1文字スイープ）
+  // カラオケ同期（コード変化タップ・1文字スイープ）
   // ==========================================================
-  function chordsDurationOf(song) {
-    let sec = 0;
-    buildChordList(song).forEach(it => { const tempo = it.tempo || 90; sec += (it.beats || 1) * (60 / tempo); });
-    return sec;
-  }
-
   async function openKaraoke(song) {
     ChordLib.ensure(song);
     const audios = (await DB.Media.bySong(song.id)).filter(m => m.kind === 'audio');
@@ -568,9 +562,11 @@
       const list = el('div', { class: 'kk-editlist' });
       anchors.forEach((a, i) => {
         const timeInput = el('input', { type: 'number', step: '0.05', min: '0', class: 'chord-num', value: String(Math.round((song.sync.times[i] || 0) * 100) / 100) });
-        const sync2 = () => { timeInput.value = String(Math.round((song.sync.times[i] || 0) * 100) / 100); saveSync(); };
-        timeInput.addEventListener('change', () => { let v = parseFloat(timeInput.value); if (isNaN(v) || v < 0) v = 0; song.sync.times[i] = v; saveSync(); });
-        const minus = el('button', { class: 'btn btn-sm', text: '−', onclick: () => { song.sync.times[i] = Math.max(0, (song.sync.times[i] || 0) - 0.05); sync2(); } });
+        // 秒は常に昇順を保つ（隣接値でクランプ）。順序が崩れると補間・発音が乱れるため。
+        const clampTime = () => { const t = song.sync.times; let v = Math.max(0, t[i] || 0); if (i > 0) v = Math.max(v, t[i - 1]); if (i < t.length - 1) v = Math.min(v, t[i + 1]); t[i] = Math.round(v * 1000) / 1000; };
+        const sync2 = () => { clampTime(); timeInput.value = String(Math.round((song.sync.times[i] || 0) * 100) / 100); saveSync(); };
+        timeInput.addEventListener('change', () => { let v = parseFloat(timeInput.value); if (isNaN(v) || v < 0) v = 0; song.sync.times[i] = v; sync2(); });
+        const minus = el('button', { class: 'btn btn-sm', text: '−', onclick: () => { song.sync.times[i] = (song.sync.times[i] || 0) - 0.05; sync2(); } });
         const plus = el('button', { class: 'btn btn-sm', text: '＋', onclick: () => { song.sync.times[i] = (song.sync.times[i] || 0) + 0.05; sync2(); } });
         list.append(el('div', { class: 'kk-editrow' }, [
           el('span', { class: 'kk-editchord', text: a.chord }),
