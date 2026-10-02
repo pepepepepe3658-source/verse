@@ -114,8 +114,9 @@
     const endId = setTimeout(() => {
       if (session.stopped) return;
       if (opts.loop) {
-        // ループ：現在セッションを閉じずに再スケジュール
+        // ループ：再スケジュール。再帰 play() 内の stop() で onEnd が誤発火しないよう先に無効化する
         if (opts.onStep) opts.onStep(-1);
+        session.onEnd = null;
         play(chordList, opts);
       } else {
         if (opts.onStep) opts.onStep(-1);
@@ -147,5 +148,21 @@
     return { buffer: buf, steps: sched.steps, noteCount: sched.oscs.length };
   }
 
-  global.AudioEngine = { play, stop, renderOffline, isSupported, ensureCtx };
+  // 絶対時刻（再生開始からの秒）でコードを鳴らす。メイン再生(active)とは独立。
+  //   events: [{ freqs:number[], at:number(秒), dur:number(秒) }] / 返り値 { stop() }
+  function playTimed(events) {
+    const context = ensureCtx();
+    if (!context) return { stop() {} };
+    const master = context.createGain();
+    master.gain.value = 0.8;
+    master.connect(context.destination);
+    const base = context.currentTime + 0.06;
+    const oscs = [];
+    (events || []).forEach(e => {
+      (e.freqs || []).forEach(f => oscs.push(scheduleNote(context, master, f, base + Math.max(0, e.at || 0), Math.max(0.12, e.dur || 0.5))));
+    });
+    return { stop() { oscs.forEach(o => { try { o.stop(); } catch (err) {} }); try { master.disconnect(); } catch (err) {} } };
+  }
+
+  global.AudioEngine = { play, stop, renderOffline, isSupported, ensureCtx, playTimed };
 })(window);

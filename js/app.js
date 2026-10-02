@@ -228,7 +228,7 @@
     } else {
       const lines = text.split('\n');
       for (const line of lines) {
-        if (/^\s*\[.+\]\s*$/.test(line)) {
+        if (/^\s*\[[^\]]+\]\s*$/.test(line)) {
           view.appendChild(el('span', { class: 'lyrics-section-label', text: line.trim() }));
           view.appendChild(document.createTextNode('\n'));
         } else {
@@ -323,7 +323,7 @@
     const blocks = []; let cur = null;
     lines.forEach(raw => {
       const t = raw.trim();
-      if (/^\[.+\]$/.test(t)) { cur = { label: t, lines: [] }; blocks.push(cur); }
+      if (/^\[[^\]]+\]$/.test(t)) { cur = { label: t, lines: [] }; blocks.push(cur); }
       else { if (!cur) { cur = { label: '', lines: [] }; blocks.push(cur); } cur.lines.push(raw); }
     });
     return blocks;
@@ -415,131 +415,176 @@
   async function openKaraoke(song) {
     ChordLib.ensure(song);
     const audios = (await DB.Media.bySong(song.id)).filter(m => m.kind === 'audio');
-    const { rows, tokens } = LyricSync.tokenizeLyrics(song.lyrics);
+    const { rows, totalChars, anchors } = LyricSync.flattenChars(song.lyrics);
+    // 文字位置 g → コード（アンカー。表示用）
+    const chordAtG = {};
+    anchors.forEach(a => { (chordAtG[a.g] = chordAtG[a.g] || []).push(a.chord); });
 
-    // 歌詞表示（1文字spanで構築）
+    // 歌詞表示（1文字=1span。アンカー位置の上にコード名）
     const disp = el('div', { class: 'kk-display' });
-    const charSpans = [];
+    const charSpanByG = new Array(totalChars);
     rows.forEach(row => {
       if (row.type === 'label') { disp.appendChild(el('div', { class: 'kk-label', text: row.text })); return; }
       const line = el('div', { class: 'kk-line' });
       row.segs.forEach(seg => {
-        if (seg.space) { line.appendChild(document.createTextNode(seg.text)); return; }
-        const wspan = el('span', { class: 'kk-word', 'data-g': seg.gindex });
-        const arr = [];
-        for (const ch of seg.text) { const cs = el('span', { class: 'kk-char', text: ch }); wspan.appendChild(cs); arr.push(cs); }
-        charSpans[seg.gindex] = arr;
-        line.appendChild(wspan);
+        const cs = el('span', { class: 'kk-char', text: seg.ch, 'data-g': seg.g });
+        charSpanByG[seg.g] = cs;
+        if (chordAtG[seg.g]) {
+          const chunk = el('span', { class: 'kk-chunk' }, [el('span', { class: 'kk-wchord', text: chordAtG[seg.g].join(' ') }), cs]);
+          line.appendChild(chunk);
+        } else { line.appendChild(cs); }
       });
       if (!row.segs.length) line.appendChild(document.createTextNode(' '));
       disp.appendChild(line);
     });
 
+    // 音源：伴奏なし（コードのみ）＋ 保存済み音声
     const srcSel = el('select', { class: 'chord-sel' });
-    srcSel.appendChild(el('option', { value: 'chords', text: 'コード進行の合成音' }));
+    srcSel.appendChild(el('option', { value: 'none', text: '伴奏なし（コードのみ鳴らす）' }));
     audios.forEach(m => srcSel.appendChild(el('option', { value: 'media:' + m.id, text: '音声: ' + m.name })));
     if (song.sync && song.sync.source) { const has = [...srcSel.options].some(o => o.value === song.sync.source); if (has) srcSel.value = song.sync.source; }
 
     const status = el('div', { class: 'kk-status' });
     const controls = el('div', { class: 'kk-controls' });
+    const countEl = el('div', { class: 'kk-count', hidden: true });
 
-    let prevFill = [];
-    function applyFill(fill) {
-      for (let i = 0; i < charSpans.length; i++) {
-        if (!charSpans[i]) continue;
-        const n = fill[i] || 0;
-        if (prevFill[i] === n) continue;
-        const arr = charSpans[i];
-        for (let c = 0; c < arr.length; c++) arr[c].classList.toggle('sung', c < n);
+    function applyByTime(ct, elapsed) {
+      for (let g = 0; g < totalChars; g++) {
+        const s = charSpanByG[g]; if (!s) continue;
+        const sung = ct[g] <= elapsed;
+        if (s._sung !== sung) { s.classList.toggle('sung', sung); s._sung = sung; }
       }
-      prevFill = fill.slice();
     }
-    function clearFill() { applyFill(new Array(tokens.length).fill(0)); prevFill = []; }
-    function clearCue() { disp.querySelectorAll('.kk-word.cue').forEach(n => n.classList.remove('cue')); }
-    function setCue(g) { clearCue(); const w = disp.querySelector('.kk-word[data-g="' + g + '"]'); if (w) { w.classList.add('cue'); w.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
+    function clearFill() { for (let g = 0; g < totalChars; g++) { const s = charSpanByG[g]; if (s && s._sung) { s.classList.remove('sung'); s._sung = false; } } }
+    function clearCue() { disp.querySelectorAll('.kk-char.cue').forEach(n => n.classList.remove('cue')); }
+    function scrollToG(g) { const s = charSpanByG[g]; if (!s) return; const dr = disp.getBoundingClientRect(), sr = s.getBoundingClientRect(); disp.scrollTop += (sr.top - dr.top) - dr.height / 2 + sr.height / 2; }
+    function cueAnchor(k) { clearCue(); const a = anchors[k]; if (!a) return; const s = charSpanByG[a.g]; if (s) { s.classList.add('cue'); scrollToG(a.g); } }
+    function showCount(n) { countEl.hidden = false; countEl.textContent = n > 0 ? String(n) : 'START'; }
+    function hideCount() { countEl.hidden = true; }
 
-    async function getDuration(source) {
-      if (source === 'chords') return chordsDurationOf(song);
+    async function getDuration(source, forRecord) {
+      if (source === 'none') { if (forRecord) return 0; const t = (song.sync && song.sync.times) || []; return (song.sync && song.sync.duration) || ((t[t.length - 1] || 0) + 1); }
       const m = audios.find(x => 'media:' + x.id === source);
       return m ? await Karaoke.audioDuration(m.blob) : 0;
     }
     function playOpts(source, extra) {
-      if (source === 'chords') return Object.assign({ mode: 'chords', chordList: buildChordList(song) }, extra);
+      if (source === 'none') return Object.assign({ mode: 'chords', chordList: [] }, extra); // 無音クロックのみ
       const m = audios.find(x => 'media:' + x.id === source);
       return Object.assign({ mode: 'audio', blob: m.blob }, extra);
     }
-
-    let syncTimes = [], syncIndex = 0;
-
-    function renderIdle() {
-      controls.innerHTML = ''; clearCue(); clearFill();
-      const canPlay = LyricSync.validate(song.sync, song.lyrics) &&
-        (song.sync.source === 'chords' || audios.some(x => 'media:' + x.id === song.sync.source));
-      controls.append(
-        el('div', { class: 'field', style: 'margin-bottom:8px' }, [el('label', { text: '音源' }), srcSel]),
-        el('div', { class: 'kk-btnrow' }, [
-          el('button', { class: 'btn btn-primary', text: '● 同期する（タップ記録）', onclick: startSync }),
-          el('button', { class: 'btn', text: '▶ カラオケ再生', disabled: canPlay ? null : 'disabled', onclick: startPlay }),
-        ])
-      );
-      status.textContent = !tokens.length ? '歌詞がありません。先に歌詞を入力してください。'
-        : (canPlay ? 'この音源で同期済みです。「▶ カラオケ再生」で再生できます。' : 'まだ同期していません。「● 同期する」でタイミングを記録してください。');
+    function saveSync() {
+      song.updatedAt = new Date().toISOString();
+      DB.Songs.put(song).then(() => { const i = state.songs.findIndex(x => x.id === song.id); if (i >= 0) state.songs[i] = song; });
     }
 
-    async function startSync() {
-      if (!tokens.length) { toast('歌詞がありません'); return; }
-      const source = srcSel.value;
-      const duration = await getDuration(source);
-      syncTimes = []; syncIndex = 0; clearFill();
-      controls.innerHTML = '';
-      const tapBtn = el('button', { class: 'btn btn-primary kk-tap', text: 'タップ（語の頭で）' });
-      const backBtn = el('button', { class: 'btn', text: '1つ戻る' });
-      const saveBtn = el('button', { class: 'btn', text: '保存' });
+    function renderIdle() {
+      Karaoke.stop(); controls.innerHTML = ''; clearCue(); clearFill(); hideCount();
+      const valid = LyricSync.validateAnchors(song.sync, song.lyrics) &&
+        (song.sync.source === 'none' || audios.some(x => 'media:' + x.id === song.sync.source));
+      if (!anchors.length) {
+        status.textContent = 'このカラオケは「歌詞に埋め込んだコード」を使います。先に「コード譜」でコードを配置してください。';
+        return;
+      }
+      controls.append(el('div', { class: 'field', style: 'margin-bottom:8px' }, [el('label', { text: '音源' }), srcSel]));
+      controls.append(el('div', { class: 'kk-btnrow' }, [
+        el('button', { class: 'btn btn-primary', text: '● 同期する（タップ記録）', onclick: () => beginRecord(0, false) }),
+        el('button', { class: 'btn', text: '▶ 再生', disabled: valid ? null : 'disabled', onclick: startPlay }),
+        el('button', { class: 'btn', text: '✎ 編集', disabled: valid ? null : 'disabled', onclick: openSyncEditor }),
+      ]));
+      status.textContent = valid ? '同期済みです。「▶ 再生」で曲として再生、「✎ 編集」で微調整できます。'
+        : 'まだ同期していません。「● 同期する」→カウント後、コードが変わる瞬間にタップしてください。';
+    }
+
+    // 記録（fromIndex から。single=true なら1点だけ）
+    async function beginRecord(fromIndex, single) {
+      if (!anchors.length) { toast('先に歌詞へコードを配置してください（コード譜）'); return; }
+      const source = (song.sync && song.sync.source) ? song.sync.source : srcSel.value;
+      const duration = await getDuration(source, true);
+      const base = (song.sync && Array.isArray(song.sync.times)) ? song.sync.times.slice() : [];
+      while (base.length < anchors.length) base.push(base.length > 0 ? base[base.length - 1] : 0);
+      let idx = fromIndex;
+
+      controls.innerHTML = ''; clearFill();
+      const tapBtn = el('button', { class: 'btn btn-primary kk-tap', text: 'タップ（コードが変わる瞬間）', disabled: 'disabled' });
+      const backBtn = el('button', { class: 'btn', text: '1つ戻る', disabled: 'disabled' });
+      const saveBtn = el('button', { class: 'btn', text: '保存', disabled: 'disabled' });
       const abortBtn = el('button', { class: 'btn btn-danger', text: '中止' });
       controls.append(el('div', { class: 'kk-btnrow' }, [tapBtn]), el('div', { class: 'kk-btnrow' }, [backBtn, saveBtn, abortBtn]));
-      setCue(0);
+      cueAnchor(idx);
+
+      let ci = null;
+      function doSave() {
+        Karaoke.stop(); hideCount();
+        song.sync = { source, duration: (source === 'none' ? ((base[anchors.length - 1] || 0) + 1) : duration) || ((base[anchors.length - 1] || 0) + 1), chords: anchors.map(a => a.chord), positions: anchors.map(a => a.g), times: base.slice(0, anchors.length) };
+        saveSync(); toast('同期を保存しました'); renderIdle();
+      }
+      abortBtn.addEventListener('click', () => { if (ci) ci.cancel(); Karaoke.stop(); hideCount(); renderIdle(); });
+      saveBtn.addEventListener('click', doSave);
+      backBtn.addEventListener('click', () => { if (idx > fromIndex) { idx--; cueAnchor(idx); status.textContent = `記録中… ${idx}/${anchors.length}`; } });
       tapBtn.addEventListener('click', () => {
-        if (syncIndex >= tokens.length) return;
-        syncTimes[syncIndex] = Karaoke.currentTime();
-        const f = prevFill.slice(); f[syncIndex] = tokens[syncIndex].text.length; applyFill(f);
-        syncIndex++;
-        if (syncIndex < tokens.length) { setCue(syncIndex); status.textContent = `記録中… ${syncIndex}/${tokens.length}`; }
-        else { clearCue(); status.textContent = `全${tokens.length}語を記録しました。「保存」で確定します。`; }
+        if (idx >= anchors.length) return;
+        base[idx] = Karaoke.currentTime(); idx++;
+        if (single) { doSave(); return; }
+        if (idx < anchors.length) { cueAnchor(idx); status.textContent = `記録中… ${idx}/${anchors.length}`; }
+        else { clearCue(); status.textContent = `全${anchors.length}個を記録。「保存」で確定`; }
       });
-      backBtn.addEventListener('click', () => {
-        if (syncIndex > 0) { syncIndex--; syncTimes.length = syncIndex; const f = prevFill.slice(); f[syncIndex] = 0; applyFill(f); setCue(syncIndex); status.textContent = `記録中… ${syncIndex}/${tokens.length}`; }
+
+      status.textContent = 'カウント…';
+      ci = Karaoke.countIn({
+        count: 3, intervalMs: 600, onTick: (k) => showCount(k),
+        onDone: () => {
+          hideCount();
+          tapBtn.disabled = false; backBtn.disabled = false; saveBtn.disabled = false;
+          status.textContent = single ? 'このコードの変化点でタップ' : '再生中… コードが変わる瞬間にタップ';
+          Karaoke.play(playOpts(source, { duration, onTime: () => {}, onEnd: () => { if (!single) status.textContent = '音源終了。保存できます'; } }));
+        }
       });
-      saveBtn.addEventListener('click', async () => {
-        Karaoke.stop();
-        const times = [];
-        for (let i = 0; i < tokens.length; i++) times[i] = syncTimes[i] != null ? syncTimes[i] : (i > 0 ? times[i - 1] : 0);
-        song.sync = { source, duration: duration || ((times[times.length - 1] || 0) + 1), tokens: tokens.map(t => t.text), times };
-        song.updatedAt = new Date().toISOString(); await DB.Songs.put(song);
-        const idx = state.songs.findIndex(x => x.id === song.id); if (idx >= 0) state.songs[idx] = song;
-        toast('同期を保存しました'); renderIdle();
-      });
-      abortBtn.addEventListener('click', () => { Karaoke.stop(); renderIdle(); });
-      status.textContent = '再生中… 語の頭で「タップ」してください';
-      Karaoke.play(playOpts(source, { duration, onTime: () => {}, onEnd: () => { status.textContent += '（音源終了。保存できます）'; } }));
     }
 
     async function startPlay() {
-      if (!LyricSync.validate(song.sync, song.lyrics)) { toast('歌詞が変わっています。同期し直してください'); return; }
+      if (!LyricSync.validateAnchors(song.sync, song.lyrics)) { toast('歌詞／コードが変わっています。録り直してください'); return; }
       const source = song.sync.source;
-      if (source !== 'chords' && !audios.find(x => 'media:' + x.id === source)) { toast('同期した音源が見つかりません。再同期してください'); return; }
+      if (source !== 'none' && !audios.find(x => 'media:' + x.id === source)) { toast('同期した音源が見つかりません。録り直してください'); return; }
       controls.innerHTML = '';
       controls.append(el('div', { class: 'kk-btnrow' }, [el('button', { class: 'btn btn-danger', text: '■ 停止', onclick: () => { Karaoke.stop(); renderIdle(); } })]));
       status.textContent = '再生中…'; clearFill();
-      const duration = song.sync.duration || await getDuration(source);
+      const duration = song.sync.duration || await getDuration(source, false);
+      const ct = LyricSync.computeCharTimes(totalChars, anchors, song.sync.times, duration);
+      const chordEvents = anchors.map((a, i) => ({ freqs: ChordLib.freqs(a.chord), at: song.sync.times[i], dur: ((i + 1 < anchors.length ? song.sync.times[i + 1] : duration) - song.sync.times[i]) })).filter(e => e.freqs.length && e.dur > 0);
+      let lastG = -1;
       Karaoke.play(playOpts(source, {
-        duration,
-        onTime: (t) => applyFill(LyricSync.charStateAt(tokens, song.sync.times, duration, t)),
-        onEnd: () => { applyFill(LyricSync.charStateAt(tokens, song.sync.times, duration, duration + 1)); renderIdle(); },
+        duration, chordEvents,
+        onTime: (t) => {
+          applyByTime(ct, t);
+          let cur = -1; for (let g = 0; g < totalChars; g++) { if (ct[g] <= t) cur = g; else break; }
+          if (cur >= 0 && cur !== lastG) { lastG = cur; scrollToG(cur); }
+        },
+        onEnd: () => { applyByTime(ct, duration + 1); renderIdle(); },
       }));
     }
 
+    function openSyncEditor() {
+      Karaoke.stop(); controls.innerHTML = ''; clearCue(); clearFill();
+      const list = el('div', { class: 'kk-editlist' });
+      anchors.forEach((a, i) => {
+        const timeInput = el('input', { type: 'number', step: '0.05', min: '0', class: 'chord-num', value: String(Math.round((song.sync.times[i] || 0) * 100) / 100) });
+        const sync2 = () => { timeInput.value = String(Math.round((song.sync.times[i] || 0) * 100) / 100); saveSync(); };
+        timeInput.addEventListener('change', () => { let v = parseFloat(timeInput.value); if (isNaN(v) || v < 0) v = 0; song.sync.times[i] = v; saveSync(); });
+        const minus = el('button', { class: 'btn btn-sm', text: '−', onclick: () => { song.sync.times[i] = Math.max(0, (song.sync.times[i] || 0) - 0.05); sync2(); } });
+        const plus = el('button', { class: 'btn btn-sm', text: '＋', onclick: () => { song.sync.times[i] = (song.sync.times[i] || 0) + 0.05; sync2(); } });
+        list.append(el('div', { class: 'kk-editrow' }, [
+          el('span', { class: 'kk-editchord', text: a.chord }),
+          minus, timeInput, el('span', { class: 'chord-suf', text: '秒' }), plus,
+          el('button', { class: 'btn btn-sm', text: 'ここだけ録り直し', onclick: () => beginRecord(i, true) }),
+          el('button', { class: 'btn btn-sm', text: 'ここから録り直し', onclick: () => beginRecord(i, false) }),
+        ]));
+      });
+      controls.append(list, el('div', { class: 'kk-btnrow' }, [el('button', { class: 'btn btn-primary', text: '完了', onclick: renderIdle })]));
+      status.textContent = '各コードの秒を微調整（−／＋／数値）、または部分的に録り直しできます。';
+    }
+
     renderIdle();
-    const wrap = el('div', {}, [el('div', { class: 'kk-status-wrap' }, [status]), controls, disp]);
+    const wrap = el('div', {}, [el('div', { class: 'kk-status-wrap' }, [status]), countEl, controls, disp]);
     openModal('カラオケ（' + (song.title || '(無題)') + '）', wrap, [el('button', { class: 'btn btn-primary', text: '閉じる', onclick: closeModal })]);
   }
 
@@ -552,6 +597,7 @@
     ta.addEventListener('input', renderPreview);
     const body = el('div', {}, [
       el('div', { class: 'hint', text: '歌詞の中に [C] のようにコードを書くと、歌本表示で歌詞の上にコードが乗ります（例：[C]あの日[G]見た）。' }),
+      el('div', { style: 'margin-bottom:8px' }, [el('button', { class: 'btn btn-sm', text: '♪ コード進行のコードを歌詞に割り当てる', onclick: () => openChordAssign(song) })]),
       el('div', { class: 'field' }, [el('label', { text: 'コード譜（歌詞＋コード）' }), ta]),
       el('label', { class: 'chord-pal-label', text: 'プレビュー' }), preview,
     ]);
@@ -568,6 +614,80 @@
     openModal('コード譜編集', body, [cancel, save]);
     renderPreview();
     setTimeout(() => ta.focus(), 30);
+  }
+
+  // コード進行のコードを、歌詞の文字をタップして順に割り当てる（結果はインライン[C]として保存）
+  function flattenProgressionChords(song) {
+    const out = [];
+    (song.chords.sections || []).forEach(sec => (sec.bars || []).forEach(b => (b.chords || []).forEach(sym => out.push(displayNameSec(sec, sym)))));
+    return out;
+  }
+  function openChordAssign(song) {
+    ChordLib.ensure(song);
+    const chords = flattenProgressionChords(song);
+    if (!chords.length) { toast('コード進行にコードがありません。先にコード進行を作成してください'); return; }
+    const baseLines = (song.lyrics || '').split('\n').map(l => LyricSync.isLabel(l) ? l : LyricSync.stripChords(l));
+    if (!baseLines.some(l => !LyricSync.isLabel(l) && l.trim())) { toast('歌詞がありません。先に歌詞を入力してください'); return; }
+
+    let curIndex = 0; const placements = []; // {li, ci, chord}
+    const status = el('div', { class: 'kk-status' });
+    const disp = el('div', { class: 'ca-display' });
+
+    function updateStatus() {
+      status.textContent = curIndex < chords.length
+        ? `次に置くコード：${chords[curIndex]}（${curIndex + 1}/${chords.length}）— 歌詞の文字をタップ`
+        : `全${chords.length}個を配置しました。「完了」で保存します。`;
+    }
+    function render() {
+      disp.innerHTML = '';
+      baseLines.forEach((line, li) => {
+        if (LyricSync.isLabel(line)) { disp.appendChild(el('div', { class: 'kk-label', text: line.trim() })); return; }
+        const lineEl = el('div', { class: 'ca-line' });
+        const chars = [...line];
+        for (let ci = 0; ci <= chars.length; ci++) {
+          placements.filter(p => p.li === li && p.ci === ci).forEach(p => lineEl.appendChild(el('span', { class: 'ca-mark', text: p.chord })));
+          if (ci < chars.length) {
+            const cs = el('span', { class: 'ca-char', text: chars[ci] });
+            cs.addEventListener('click', () => placeAt(li, ci));
+            lineEl.appendChild(cs);
+          }
+        }
+        if (!chars.length) { const cs = el('span', { class: 'ca-char ca-empty', text: '␣' }); cs.addEventListener('click', () => placeAt(li, 0)); lineEl.appendChild(cs); }
+        disp.appendChild(lineEl);
+      });
+      updateStatus();
+    }
+    function placeAt(li, ci) {
+      if (curIndex >= chords.length) { toast('すべてのコードを配置しました'); return; }
+      placements.push({ li, ci, chord: chords[curIndex] }); curIndex++; render();
+    }
+
+    const cancel = el('button', { class: 'btn', text: 'キャンセル', onclick: closeModal });
+    const undo = el('button', { class: 'btn', text: '1つ戻る', onclick: () => { if (placements.length) { placements.pop(); curIndex--; render(); } } });
+    const reset = el('button', { class: 'btn', text: 'やり直し', onclick: () => { placements.length = 0; curIndex = 0; render(); } });
+    const done = el('button', {
+      class: 'btn btn-primary', text: '完了',
+      onclick: async () => {
+        const lines2 = baseLines.map((line, li) => {
+          if (LyricSync.isLabel(line)) return line;
+          const parts = [...line];
+          placements.filter(p => p.li === li).sort((a, b) => b.ci - a.ci).forEach(p => parts.splice(p.ci, 0, '[' + p.chord + ']'));
+          return parts.join('');
+        });
+        song.lyrics = lines2.join('\n'); song.updatedAt = new Date().toISOString();
+        await DB.Songs.put(song);
+        const idx = state.songs.findIndex(x => x.id === song.id); if (idx >= 0) state.songs[idx] = song;
+        closeModal(); renderList(); await renderDetail(); toast('コードを割り当てました');
+      }
+    });
+
+    const body = el('div', {}, [
+      el('div', { class: 'hint', text: 'コード進行のコードを、歌詞の文字をタップして順に置きます（そのコードは次に置くコードの直前の文字まで有効）。※歌詞に既にあった埋め込みコードは置き換わります。' }),
+      el('div', { class: 'kk-status-wrap' }, [status]),
+      disp,
+    ]);
+    render();
+    openModal('コード進行から割り当て', body, [cancel, undo, reset, done]);
   }
 
   function mediaItem(m, song) {
@@ -937,7 +1057,7 @@
 
   async function importSectionsFromLyrics(song, body) {
     const c = song.chords;
-    const labels = (song.lyrics || '').split('\n').map(l => l.trim()).filter(l => /^\[.+\]$/.test(l));
+    const labels = (song.lyrics || '').split('\n').map(l => l.trim()).filter(l => /^\[[^\]]+\]$/.test(l));
     if (!labels.length) {
       if (!c.sections.length) { c.sections.push(newSection(c, '進行')); await saveChords(song); renderChordBody(song, body); toast('セクションを1つ作成しました'); }
       else { toast('歌詞にセクション記法（[...]）が見つかりません'); }
@@ -1126,7 +1246,7 @@
   }
 
   async function restoreVersion(song, v) {
-    const ok = await confirmDialog('この版の歌詞・基本情報を現在の曲に復元します。現在の内容は上書きされます（先に「この版を保存」で退避できます）。よろしいですか？', '復元する');
+    const ok = await confirmDialog('この版の歌詞・基本情報・コード進行を現在の曲に復元します。現在の内容は上書きされます（先に「この版を保存」で退避できます）。よろしいですか？', '復元する');
     if (!ok) return;
     const updated = { ...song, title: v.title, status: v.status, tags: (v.tags || []).slice(), lyrics: v.lyrics, updatedAt: new Date().toISOString() };
     if (v.chords) updated.chords = JSON.parse(JSON.stringify(v.chords));
@@ -1370,8 +1490,72 @@
     setTimeout(() => memo.focus(), 30);
   }
 
+  // ==========================================================
+  // 使い方ガイド（アプリ内ヘルプ）
+  // ==========================================================
+  function openHelp() {
+    const sec = (title, lines) => el('div', { class: 'help-sec' }, [
+      el('h3', { class: 'help-h', text: title }),
+      el('ul', { class: 'help-ul' }, lines.map(t => el('li', { text: t }))),
+    ]);
+    const body = el('div', { class: 'help-body' }, [
+      el('p', { class: 'help-lead', text: 'Verse は歌詞・コード・ボイスメモ・動画を1曲ごとに管理する、無料・オフライン・端末内保存のアプリです。歌詞からでもコードからでも自由に作れます。' }),
+      sec('曲の管理', [
+        '「＋ 新規」で曲を追加。曲名・ステータス（アイデア〜完成）・タグ・歌詞を入力。',
+        '詳細画面の「編集」「削除」で変更。削除は音声・動画・バージョンも一緒に消えます。',
+        '一覧上部の検索で、曲名・歌詞・タグ・ステータス・コード名を横断検索。',
+      ]),
+      sec('歌詞', [
+        '「編集」で入力。行に [Aメロ] [サビ] などと書くと見出しになります。',
+      ]),
+      sec('コード譜（歌詞の上にコード）', [
+        '歌詞セクションの「コード譜」で、歌詞に [C]あの日[G]見た のようにコードを埋め込みます。',
+        '「♪ コード進行のコードを歌詞に割り当てる」→ 歌詞の文字をタップして「このコードはこの文字まで」を指定できます。',
+        '歌本ビューで、歌詞の上にコードが並びます。',
+      ]),
+      sec('コード進行', [
+        '小節の「＋」→ ルート×種類のパレットでコード入力（♯/♭切替・オンベース・直接入力も可）。',
+        '各セクションの「⚙ 設定」でテンポ/拍子/カポ/移調/スタイル(ブロック/ストラム/アルペジオ)/ループをセクション別に設定。',
+        '設定のコピー/貼り付け・全体適用・セクション複製が可能。',
+        '「▶ 再生」で全曲、各セクションの「▶」でそのセクションだけ再生。推定キーも自動表示。',
+        '移調 −1＝半音下げ、+1＝半音上げ。カポ設定時はコード下段に「押さえるコード」を表示。',
+      ]),
+      sec('歌本ビュー', [
+        '詳細の「歌本」で、歌詞＋コードをまとめて表示（読み取り用）。ここから「カラオケ」「コード譜編集」も開けます。',
+      ]),
+      sec('カラオケ（曲として再生）', [
+        '前提：歌詞にコードを配置しておく（コード譜）。',
+        '歌本→「▶ カラオケ」→ 音源（伴奏なし/保存音声）を選び「● 同期する」。',
+        'カウント（3・2・1）の後、コードが変わる瞬間にタップしてタイミングを記録。',
+        '「▶ 再生」で、記録どおりコードが鳴り歌詞が1文字ずつ進みます。',
+        '「✎ 編集」で各コードの秒を微調整（−/＋/数値）、部分的に録り直しできます（最初からやり直し不要）。',
+      ]),
+      sec('ボイスメモ・動画・録音', [
+        '音声/動画は「＋ アップロード」で追加。音声は「● 録音」でアプリ内録音も可能。',
+        'ファイルをタップするとプレイヤー（再生・シーク）が開きます。',
+      ]),
+      sec('クイックキャプチャ（⚡）', [
+        'ヘッダの ⚡ から、メモ＋その場録音を「無題（日付）」の新しい曲として即保存。',
+      ]),
+      sec('バージョン管理', [
+        '「この版を保存」で歌詞・基本情報・コード進行のスナップショットを保存。差分表示・復元が可能（音声・動画は含みません）。',
+      ]),
+      sec('バックアップ・容量', [
+        'データは端末内のみ。⋯「データ管理」から ZIP でバックアップ/復元。機種変更もこれで移行。',
+        '▦ でストレージ使用量（動画/音声/歌詞の内訳）を表示。こまめなバックアップ推奨。',
+      ]),
+      sec('iPhone での注意', [
+        '音は「▶」タップで鳴ります。消音（マナー）スイッチで鳴らないことがあります。',
+        'iPhoneのボイスメモは「共有→ファイルに保存」後にアップロードしてください。',
+        '最新機能が出ないときはアプリを開き直すと更新されます。',
+      ]),
+    ]);
+    openModal('使い方ガイド', body, [el('button', { class: 'btn btn-primary', text: '閉じる', onclick: closeModal })]);
+  }
+
   function bindGlobal() {
     searchInput.addEventListener('input', () => { state.query = searchInput.value; renderList(); });
+    $('btnHelp').addEventListener('click', openHelp);
     $('btnNew').addEventListener('click', () => openSongForm(null));
     $('btnQuick').addEventListener('click', openQuickCapture);
     $('btnStorage').addEventListener('click', openStorageModal);

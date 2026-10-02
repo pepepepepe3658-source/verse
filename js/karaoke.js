@@ -9,7 +9,7 @@
 (function (global) {
   'use strict';
 
-  let audioEl = null, raf = null, running = false, mode = null, startPerf = 0, dur = 0, onTimeCb = null, onEndCb = null, objUrl = null;
+  let audioEl = null, raf = null, running = false, mode = null, startPerf = 0, dur = 0, onTimeCb = null, onEndCb = null, objUrl = null, chordHandle = null;
 
   function clearRaf() { if (raf) { cancelAnimationFrame(raf); raf = null; } }
 
@@ -18,6 +18,7 @@
     clearRaf();
     if (audioEl) { try { audioEl.pause(); } catch (e) {} audioEl.onended = null; audioEl = null; }
     if (objUrl) { URL.revokeObjectURL(objUrl); objUrl = null; }
+    if (chordHandle) { try { chordHandle.stop(); } catch (e) {} chordHandle = null; }
     if (mode === 'chords' && global.AudioEngine) { try { AudioEngine.stop(); } catch (e) {} }
     mode = null;
   }
@@ -48,6 +49,10 @@
     stop();
     onTimeCb = opts.onTime || null; onEndCb = opts.onEnd || null; dur = opts.duration || 0;
     running = true;
+    // コード譜のコード伴奏（絶対時刻）を同時スケジュール
+    if (opts.chordEvents && opts.chordEvents.length && global.AudioEngine && AudioEngine.playTimed) {
+      chordHandle = AudioEngine.playTimed(opts.chordEvents);
+    }
     if (opts.mode === 'chords') {
       mode = 'chords';
       startPerf = performance.now();
@@ -77,5 +82,23 @@
 
   function isRunning() { return running; }
 
-  global.Karaoke = { play, stop, currentTime, isRunning, audioDuration };
+  // カウントイン：3・2・1 を onTick で通知しつつクリック音を鳴らし、完了で onDone
+  function clickTick() { if (global.AudioEngine && AudioEngine.playTimed) { try { AudioEngine.playTimed([{ freqs: [1000], at: 0, dur: 0.05 }]); } catch (e) {} } }
+  function countIn(opts) {
+    opts = opts || {};
+    const n = opts.count || 3, iv = opts.intervalMs || 600;
+    let i = n, timer = null, cancelled = false;
+    function step() {
+      if (cancelled) return;
+      if (i <= 0) { if (opts.onDone) opts.onDone(); return; }
+      if (opts.onTick) opts.onTick(i);
+      clickTick();
+      i--;
+      timer = setTimeout(step, iv);
+    }
+    step();
+    return { cancel() { cancelled = true; if (timer) clearTimeout(timer); } };
+  }
+
+  global.Karaoke = { play, stop, currentTime, isRunning, audioDuration, countIn };
 })(window);

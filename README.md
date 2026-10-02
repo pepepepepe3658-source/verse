@@ -106,12 +106,18 @@ Verse/
 │   ├── zip.js                 自前ZIP（store/無圧縮）+ CRC32
 │   ├── db.js                  IndexedDBラッパ（songs/media/versions）
 │   ├── storage.js             ストレージ使用量の実測・内訳
-│   ├── media.js               メディア保存・カスタムプレイヤー
+│   ├── media.js               メディア保存・カスタムプレイヤー・録音保存
 │   ├── versions.js            バージョンのスナップショット・差分
 │   ├── backup.js              バックアップ/復元（ZIP）
+│   ├── chords.js              コード理論（解析・移調・推定キー・構成音）
+│   ├── audio.js               Web Audio 合成音エンジン（コード再生）
+│   ├── recorder.js            MediaRecorder 録音ラッパ
+│   ├── lyricsync.js           歌詞のトークン化・カラオケ補間
+│   ├── karaoke.js             カラオケ再生クロック（音声/合成音）
 │   └── app.js                 画面制御・一覧/詳細/検索
 ├── icons/                     アプリアイコン（モノトーン）
-└── README.md
+├── README.md                  セットアップ・公開手順
+└── README_USER.md             使い方ガイド（ユーザー向け）
 ```
 
 ---
