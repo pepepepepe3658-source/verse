@@ -348,6 +348,7 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border: none;
 .ca-char:hover { background: var(--c-surface-2); box-shadow: 0 1px 0 var(--c-text-3); }
 .ca-char.ca-empty { color: var(--c-text-3); }
 .ca-mark { font-size: 12px; font-weight: 700; color: var(--c-on-accent); background: var(--c-text-2); border-radius: 4px; padding: 0 5px; margin: 0 1px; }
+.ca-beat { font-size: 12px; padding: 0 8px; margin-left: 6px; vertical-align: middle; }
 
 /* ===== レスポンシブ（スマホ） ===== */
 .only-mobile { display: none; }

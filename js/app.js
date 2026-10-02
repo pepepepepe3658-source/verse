@@ -240,7 +240,7 @@
     body.appendChild(view);
     if (hasInlineChords(text)) body.appendChild(el('div', { class: 'notice', style: 'margin-top:10px', text: '※ 埋め込んだコード（[C]等）は「歌本」表示で歌詞の上に表示されます。' }));
     return section('歌詞', [
-      el('button', { class: 'btn btn-sm', text: 'コード譜', title: 'コードを埋め込んで編集', onclick: () => openChordSheetEditor(song) }),
+      el('button', { class: 'btn btn-sm', text: 'コード譜', title: 'コード進行のコードを歌詞に割り当てる', onclick: () => openChordAssign(song) }),
       el('button', { class: 'btn btn-sm', text: '編集', onclick: () => openSongForm(song) }),
     ], body);
   }
@@ -397,7 +397,7 @@
     const wrap = el('div', {}, [head, container]);
     const footer = [
       el('button', { class: 'btn', text: '▶ カラオケ', onclick: () => openKaraoke(song) }),
-      el('button', { class: 'btn', text: '✎ コード譜を編集', onclick: () => openChordSheetEditor(song) }),
+      el('button', { class: 'btn', text: '✎ コード譜を編集', onclick: () => openChordAssign(song) }),
       el('button', { class: 'btn btn-primary', text: '閉じる', onclick: closeModal }),
     ];
     openModal('歌本ビュー（' + (song.title || '(無題)') + '）', wrap, footer);
@@ -584,34 +584,6 @@
     openModal('カラオケ（' + (song.title || '(無題)') + '）', wrap, [el('button', { class: 'btn btn-primary', text: '閉じる', onclick: closeModal })]);
   }
 
-  // コード譜編集：歌詞に [C] を埋め込む専用エディタ（ライブプレビュー付き）
-  function openChordSheetEditor(song) {
-    const ta = el('textarea', { class: 'chord-input cp-editor', placeholder: '[C]あの日[G]見た夕焼けが…\n\n行全体が [Aメロ] だけの行はセクション見出しになります。' });
-    ta.value = song.lyrics || '';
-    const preview = el('div', { class: 'cp-preview songbook' });
-    const renderPreview = () => { preview.innerHTML = ''; buildSheet(ta.value, song, preview, true); };
-    ta.addEventListener('input', renderPreview);
-    const body = el('div', {}, [
-      el('div', { class: 'hint', text: '歌詞の中に [C] のようにコードを書くと、歌本表示で歌詞の上にコードが乗ります（例：[C]あの日[G]見た）。' }),
-      el('div', { style: 'margin-bottom:8px' }, [el('button', { class: 'btn btn-sm', text: '♪ コード進行のコードを歌詞に割り当てる', onclick: () => openChordAssign(song) })]),
-      el('div', { class: 'field' }, [el('label', { text: 'コード譜（歌詞＋コード）' }), ta]),
-      el('label', { class: 'chord-pal-label', text: 'プレビュー' }), preview,
-    ]);
-    const cancel = el('button', { class: 'btn', text: 'キャンセル', onclick: closeModal });
-    const save = el('button', {
-      class: 'btn btn-primary', text: '保存',
-      onclick: async () => {
-        song.lyrics = ta.value; song.updatedAt = new Date().toISOString();
-        await DB.Songs.put(song);
-        const i = state.songs.findIndex(x => x.id === song.id); if (i >= 0) state.songs[i] = song;
-        closeModal(); renderList(); await renderDetail(); toast('保存しました');
-      }
-    });
-    openModal('コード譜編集', body, [cancel, save]);
-    renderPreview();
-    setTimeout(() => ta.focus(), 30);
-  }
-
   // コード進行のコードを、歌詞の文字をタップして順に割り当てる（結果はインライン[C]として保存）
   function flattenProgressionChords(song) {
     const out = [];
@@ -622,8 +594,8 @@
     ChordLib.ensure(song);
     const chords = flattenProgressionChords(song);
     if (!chords.length) { toast('コード進行にコードがありません。先にコード進行を作成してください'); return; }
-    const baseLines = (song.lyrics || '').split('\n').map(l => LyricSync.isLabel(l) ? l : LyricSync.stripChords(l));
-    if (!baseLines.some(l => !LyricSync.isLabel(l) && l.trim())) { toast('歌詞がありません。先に歌詞を入力してください'); return; }
+    let baseLines = (song.lyrics || '').split('\n').map(l => LyricSync.isLabel(l) ? l : LyricSync.stripChords(l));
+    if (!baseLines.length) baseLines = [''];
 
     let curIndex = 0; const placements = []; // {li, ci, chord}
     const status = el('div', { class: 'kk-status' });
@@ -648,7 +620,9 @@
             lineEl.appendChild(cs);
           }
         }
-        if (!chars.length) { const cs = el('span', { class: 'ca-char ca-empty', text: '␣' }); cs.addEventListener('click', () => placeAt(li, 0)); lineEl.appendChild(cs); }
+        const addBeat = el('button', { class: 'btn btn-sm ca-beat', text: '＋拍', title: '歌詞が無い区間（イントロ・間奏・アウトロ）に拍（／）を足し、そこへコードを置けます' });
+        addBeat.addEventListener('click', () => { baseLines[li] = baseLines[li] + '／'; render(); });
+        lineEl.appendChild(addBeat);
         disp.appendChild(lineEl);
       });
       updateStatus();
@@ -678,7 +652,7 @@
     });
 
     const body = el('div', {}, [
-      el('div', { class: 'hint', text: 'コード進行のコードを、歌詞の文字をタップして順に置きます（そのコードは次に置くコードの直前の文字まで有効）。※歌詞に既にあった埋め込みコードは置き換わります。' }),
+      el('div', { class: 'hint', text: 'コード進行のコードを、歌詞の文字をタップして順に置きます（そのコードは次に置くコードの直前の文字まで有効）。歌詞が無い区間（イントロ・間奏・アウトロ）は「＋拍」で拍（／）を足し、そこへコードを置けます。※歌詞に既にあった埋め込みコードは置き換わります。' }),
       el('div', { class: 'kk-status-wrap' }, [status]),
       disp,
     ]);
@@ -1505,9 +1479,10 @@
         '「編集」で入力。行に [Aメロ] [サビ] などと書くと見出しになります。',
       ]),
       sec('コード譜（歌詞の上にコード）', [
-        '歌詞セクションの「コード譜」で、歌詞に [C]あの日[G]見た のようにコードを埋め込みます。',
-        '「♪ コード進行のコードを歌詞に割り当てる」→ 歌詞の文字をタップして「このコードはこの文字まで」を指定できます。',
-        '歌本ビューで、歌詞の上にコードが並びます。',
+        '先に「コード進行」でコードを入れておきます（手入力はありません）。',
+        '歌詞セクションの「コード譜」を開き、コード進行のコードを順に、歌詞の文字をタップして置きます（そのコードは次に置くコードの直前の文字まで有効）。「1つ戻る／やり直し」も可。',
+        'イントロ・間奏・アウトロなど歌詞が無い区間は「＋拍」で拍（／）を足し、そこへコードを置けます。',
+        '「完了」で歌詞に反映され、歌本ビューで歌詞の上にコードが並びます。',
       ]),
       sec('コード進行', [
         '小節の「＋」→ ルート×種類のパレットでコード入力（♯/♭切替・オンベース・直接入力も可）。',
@@ -1517,7 +1492,7 @@
         '移調 −1＝半音下げ、+1＝半音上げ。カポ設定時はコード下段に「押さえるコード」を表示。',
       ]),
       sec('歌本ビュー', [
-        '詳細の「歌本」で、歌詞＋コードをまとめて表示（読み取り用）。ここから「カラオケ」「コード譜編集」も開けます。',
+        '詳細の「歌本」で、歌詞＋コードをまとめて表示（読み取り用）。ここから「カラオケ」「コード譜を編集（割り当て）」も開けます。',
       ]),
       sec('カラオケ（曲として再生）', [
         '前提：歌詞にコードを配置しておく（コード譜）。',
@@ -1562,6 +1537,9 @@
   async function init() {
     renderStatusFilter();
     bindGlobal();
+    // 最初のユーザー操作で音声（AudioContext）を解放する（iOS等で無音になるのを防ぐ）
+    const unlockAudio = () => { if (window.AudioEngine && AudioEngine.ensureCtx) AudioEngine.ensureCtx(); };
+    ['pointerdown', 'touchend', 'keydown'].forEach(evt => document.addEventListener(evt, unlockAudio, { passive: true }));
     try {
       await DB.open();
       await reload();

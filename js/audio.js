@@ -12,6 +12,7 @@
 
   let ctx = null;
   let active = null; // { oscillators:[], timeouts:[], stopped:false }
+  let unlocked = false;
 
   function ensureCtx() {
     if (!ctx) {
@@ -20,6 +21,15 @@
       ctx = new AC();
     }
     if (ctx.state === 'suspended') ctx.resume();
+    // iOS 等では初回ユーザー操作中に無音バッファを鳴らして音声を解放する必要がある
+    if (!unlocked) {
+      try {
+        const b = ctx.createBuffer(1, 1, 22050);
+        const s = ctx.createBufferSource();
+        s.buffer = b; s.connect(ctx.destination); s.start(0);
+        unlocked = true;
+      } catch (e) {}
+    }
     return ctx;
   }
 
